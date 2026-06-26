@@ -54,7 +54,7 @@ infra Azure subjacente).
   arquitetos — nunca reserva ou Savings Plan)
 - Licensing Program: MCA (default de qualquer calculadora Microsoft)
 - Ambientes: configurável (1 a 3). Dev e Prod como padrão; Hom é
-  opcional — não apareceu nos 2 casos reais usados como gabarito.
+  opcional, não apareceu nos 2 casos reais usados como gabarito.
 
 ## Metodologia de Validação
 
@@ -85,19 +85,19 @@ a linha pendente de confirmação (ver nota abaixo).
 - [a preencher conforme o time for percebendo limitações]
 - Possível candidato: preço de storage fixo por GB no MVP, quando a
   Azure usa tiers progressivos de volume — simplificação consciente,
-  a detalhar se confirmada.
+  a detalhar se confirmada. 
 
 ## Limitações Conhecidas
 - Não cobre Data Factory, PostgreSQL ou Fabric (fora do escopo, por
   baixa frequência relativa nos 3 casos reais analisados).
 - [CONFIRMAR] Esclarecer se o ADF foi ou não incluído no cálculo de
   PROD do PRIO — necessário para a seção de Resultados acima.
-- Ambiente de Homologação tratado como opcional, não obrigatório —
+- Ambiente de Homologação tratado como opcional, não obrigatório, 
   decisão baseada em ausência de Hom nos 2 casos reais, mesmo as
   entrevistas apontando Hom como padrão recomendado.
 
 ## Como Rodar
-[a preencher quando o repositório com o Vite estiver completo]
+[ a preencher ]
 
 ## Stack
 - Vite + JavaScript
