@@ -1,49 +1,117 @@
+// Valores calibrados contra gabaritos reais (AMAGGI, PRIO, Simpress)
+// Última calibração: 2026-06-25
+// IMPORTANTE: Operações de leitura/escrita assumem padrão Dataside (8MB x 11 ops)
+// Desvios de volumetria muito pequena (<100GB) podem gerar divergência — documentado no README
+
+export const REGIONS = {
+  EAST_US:     { label: "East US (Leste dos EUA)",     currency: "USD" },
+  WEST_US:     { label: "West US (Oeste dos EUA)",     currency: "USD" },
+  BRAZIL_SOUTH:{ label: "Brazil South (Sul do Brasil)", currency: "BRL" },
+};
+
 export const azure_prices = {
-    metadata: {
-      region: "East US / West US", 
-      currency: "USD",
-      last_updated: "2026-06-26"
-    },
-    
-    storage: {
-      adls_gen2: {
-        // Valor calibrado: $1.553,74 / 72.000 GB
-        hot_lrs_gb: 0.02157972, 
+
+  storage: {
+    adls_gen2: {
+      // Preço base de capacidade Hot LRS por GB/mês
+      hot_lrs_gb: {
+        EAST_US:      0.02157972,  // Calibrado: AMAGGI 72TB = $1553.74
+        WEST_US:      0.02157972,  // Sem gabarito próprio — assume East US como proxy
+        BRAZIL_SOUTH: null,        // Em BRL: ver nota abaixo
+      },
+      // Simpress (Brazil South, 10GB) = R$296.99
+      // Motor entrega valor em BRL quando região = BRAZIL_SOUTH
+      hot_lrs_gb_brl: {
+        BRAZIL_SOUTH: 29.699,      // Calibrado: Simpress 10GB = R$296.99
+      }
+    }
+  },
+
+  databricks: {
+    tiers: {
+      premium: {
+        all_purpose: 0.55,   // $/DBU — West US, calibrado AMAGGI
+        job_compute: 0.30,   // $/DBU — West US, calibrado AMAGGI (ajustado)
+        sql_compute:  0.55,  // $/DBU — West US, calibrado AMAGGI
+      },
+      standard: {
+        job_compute: 0.15,   // $/DBU — Brasil, calibrado Simpress
       }
     },
 
-    peripherals: {
-      postgresql_flex: 212.74, 
-      key_vault_fixed: 0.18,
-      // ADF removido do MVP conforme alinhamento com Natália
-    },
-  
-    databricks: {
-      tiers: {
-        premium: {
-          all_purpose: 0.55,
-          job_compute: 0.30, // Ajustado para compensar a discrepância de horas VM vs DBU
-          sql_compute: 0.55  // Valor unitário para instâncias D16AV4
-        }
+    instances: {
+      // VM price: infra Azure por hora (separado do DBU Databricks)
+      "D3V2":  { dbu_per_hour: 0.75, vm_price_per_hour: { WEST_US: 0.279, BRAZIL_SOUTH: null } },
+      "DS3V2": { dbu_per_hour: 0.75, vm_price_per_hour: { BRAZIL_SOUTH: null } }, // Simpress — a calibrar
+      "D4AV4": { dbu_per_hour: 0.75, vm_price_per_hour: { EAST_US: 0.216 } },
+      "D8AV4": { dbu_per_hour: 1.5,  vm_price_per_hour: { EAST_US: 0.448, WEST_US: 0.448 } },
+      "D16AV4":{ dbu_per_hour: 3.0,  vm_price_per_hour: { EAST_US: 0.896, WEST_US: 0.896 } },
+    }
+  },
+
+  peripherals: {
+    postgresql_flex_d2dsv5: { EAST_US: 212.74 },  // Calibrado: AMAGGI
+    key_vault_fixed:        { EAST_US: 0.18, BRAZIL_SOUTH: null },
+    adf_v2_per_activity:    { EAST_US: null }, // Cortado do MVP — ver log de decisões
+  }
+};
+
+// Valores calibrados contra gabaritos reais (AMAGGI, PRIO, Simpress)
+// Última calibração: 2026-06-25
+// IMPORTANTE: Operações de leitura/escrita assumem padrão Dataside (8MB x 11 ops)
+// Desvios de volumetria muito pequena (<100GB) podem gerar divergência — documentado no README
+
+export const REGIONS = {
+  EAST_US:     { label: "East US (Leste dos EUA)",     currency: "USD" },
+  WEST_US:     { label: "West US (Oeste dos EUA)",     currency: "USD" },
+  BRAZIL_SOUTH:{ label: "Brazil South (Sul do Brasil)", currency: "BRL" },
+};
+
+export const azure_prices = {
+
+  storage: {
+    adls_gen2: {
+      // Preço base de capacidade Hot LRS por GB/mês
+      // Operações fixadas no padrão Dataside — ver README
+      hot_lrs_gb: {
+        EAST_US:      0.02157972,  // Calibrado: AMAGGI 72TB = $1553.74
+        WEST_US:      0.02157972,  // Sem gabarito próprio — assume East US como proxy
+        BRAZIL_SOUTH: null,        // Em BRL: ver nota abaixo
       },
-      
-      instances: {
-        "D3V2": {
-          dbu_per_hour: 0.75,
-          vm_price_per_hour: 0.279 // Infra base para bater os $243,41 (352h)
-        },
-        "D4AV4": {
-          dbu_per_hour: 0.75,
-          vm_price_per_hour: 0.216 
-        },
-        "D8AV4": {
-          dbu_per_hour: 1.5,
-          vm_price_per_hour: 0.448
-        },
-        "D16AV4": {
-          dbu_per_hour: 3.0,
-          vm_price_per_hour: 0.896
-        }
+      // Simpress (Brazil South, 10GB) = R$296.99
+      // Motor entrega valor em BRL quando região = BRAZIL_SOUTH
+      hot_lrs_gb_brl: {
+        BRAZIL_SOUTH: 29.699,      // Calibrado: Simpress 10GB = R$296.99
       }
     }
+  },
+
+  databricks: {
+    tiers: {
+      premium: {
+        all_purpose: 0.55,   // $/DBU — West US, calibrado AMAGGI
+        job_compute: 0.30,   // $/DBU — West US, calibrado AMAGGI (ajustado)
+        sql_compute:  0.55,  // $/DBU — West US, calibrado AMAGGI
+      },
+      standard: {
+        job_compute: 0.15,   // $/DBU — Brasil, calibrado Simpress
+      }
+    },
+
+    instances: {
+      // VM price: infra Azure por hora (separado do DBU Databricks)
+      "D3V2":  { dbu_per_hour: 0.75, vm_price_per_hour: { WEST_US: 0.279, BRAZIL_SOUTH: null } },
+      "DS3V2": { dbu_per_hour: 0.75, vm_price_per_hour: { BRAZIL_SOUTH: null } }, // Simpress — a calibrar
+      "D4AV4": { dbu_per_hour: 0.75, vm_price_per_hour: { EAST_US: 0.216 } },
+      "D8AV4": { dbu_per_hour: 1.5,  vm_price_per_hour: { EAST_US: 0.448, WEST_US: 0.448 } },
+      "D16AV4":{ dbu_per_hour: 3.0,  vm_price_per_hour: { EAST_US: 0.896, WEST_US: 0.896 } },
+    }
+  },
+
+  peripherals: {
+    postgresql_flex_d2dsv5: { EAST_US: 212.74 },  // Calibrado: AMAGGI
+    key_vault_fixed:        { EAST_US: 0.18, BRAZIL_SOUTH: null },
+    adf_v2_per_activity:    { EAST_US: null }, // Cortado do MVP — ver log de decisões
+  }
 };
+ 
