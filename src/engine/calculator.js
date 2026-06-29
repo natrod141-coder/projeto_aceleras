@@ -1,40 +1,111 @@
 import { azure_prices } from '../data/prices';
 
+/**
+ * Calcula estimativa de custo Azure + Databricks.
+ *
+ * @param {object} input
+ * @param {number} input.storageGB        - Capacidade total em GB
+ * @param {string} input.storageRegion    - Região do storage (ex: "EAST_US")
+ * @param {string} input.computeRegion    - Região do Databricks/VMs (ex: "WEST_US")
+ * @param {string} input.tier             - Tier Databricks: "premium" | "standard"
+ *
+ * @param {string} input.apDevInstance    - Instância All-Purpose DEV (ex: "D3V2")
+ * @param {number} input.apDevNodes       - Número de nós All-Purpose DEV
+ * @param {number} input.apDevHorasVM     - Horas de VM All-Purpose DEV
+ * @param {number} input.apDevHorasDbu    - Horas de DBU All-Purpose DEV
+ *
+ * @param {string} input.apProdInstance   - Instância All-Purpose PROD
+ * @param {number} input.apProdNodes      - Número de nós All-Purpose PROD
+ * @param {number} input.apProdHorasVM    - Horas de VM All-Purpose PROD
+ * @param {number} input.apProdHorasDbu   - Horas de DBU All-Purpose PROD
+ *
+ * @param {string} input.jobDevInstance   - Instância Job Compute DEV
+ * @param {number} input.jobDevNodes      - Número de nós Job DEV
+ * @param {number} input.jobDevHorasVM    - Horas de VM Job DEV
+ * @param {number} input.jobDevHorasDbu   - Horas de DBU Job DEV
+ *
+ * @param {string} input.jobProdInstance  - Instância Job Compute PROD
+ * @param {number} input.jobProdNodes     - Número de nós Job PROD
+ * @param {number} input.jobProdHorasVM   - Horas de VM Job PROD
+ * @param {number} input.jobProdHorasDbu  - Horas de DBU Job PROD
+ *
+ * @param {string} input.sqlInstance      - Instância SQL Serverless
+ * @param {number} input.sqlNodes         - Número de nós SQL
+ * @param {number} input.sqlHorasVM       - Horas de VM SQL
+ * @param {number} input.sqlHorasDbu      - Horas de DBU SQL
+ *
+ * @param {boolean} input.includePostgre  - Incluir PostgreSQL?
+ * @param {boolean} input.includeKeyVault - Incluir Key Vault?
+ */
 export const calculateEstimate = (input) => {
-    const { storageGB, nodesProd, hoursProd, sqlHours, jobHoursProd } = input;
-    const p = azure_prices;
-    const t = p.databricks.tiers.premium;
-    const instD8 = p.databricks.instances["D8AV4"];
-    const instD16 = p.databricks.instances["D16AV4"];
-    const instD3 = p.databricks.instances["D3V2"];
+  const {
+    storageGB, storageRegion, computeRegion, tier,
+    apDevInstance,  apDevNodes,  apDevHorasVM,  apDevHorasDbu,
+    apProdInstance, apProdNodes, apProdHorasVM, apProdHorasDbu,
+    jobDevInstance,  jobDevNodes,  jobDevHorasVM,  jobDevHorasDbu,
+    jobProdInstance, jobProdNodes, jobProdHorasVM, jobProdHorasDbu,
+    sqlInstance, sqlNodes, sqlHorasVM, sqlHorasDbu,
+    includePostgre  = false,
+    includeKeyVault = false,
+  } = input;
 
-    // 1. Storage (72TB LRS)
-    const storageCost = storageGB * p.storage.adls_gen2.hot_lrs_gb;
+  const p  = azure_prices;
+  const t  = p.databricks.tiers[tier];
+  const inst = p.databricks.instances;
 
-    // 2. Databricks All-Purpose (DEV e PROD)
-    const dbDev = ((1 * instD3.dbu_per_hour * t.all_purpose) + (1 * instD3.vm_price_per_hour)) * hoursProd;
-    const dbProd = ((nodesProd * instD8.dbu_per_hour * t.all_purpose) + (nodesProd * instD8.vm_price_per_hour)) * hoursProd;
+  // Helper: retorna vm_price_per_hour para a região de compute
+  const vmPrice = (instanceKey) => {
+    const prices = inst[instanceKey]?.vm_price_per_hour;
+    if (!prices || prices[computeRegion] == null) {
+      console.warn(`Preço de VM não encontrado para ${instanceKey} em ${computeRegion}`);
+      return 0;
+    }
+    return prices[computeRegion];
+  };
 
-    // 3. Databricks Jobs (DEV e PROD) - Ajustado para lógica de horas DBU vs VM da AMAGGI
-    const jobDev = ((1 * instD8.dbu_per_hour * t.job_compute * (730/352)) + (1 * instD8.vm_price_per_hour)) * 352;
-    const jobProd = ((1 * instD16.dbu_per_hour * t.job_compute * (730/352)) + (1 * instD16.vm_price_per_hour)) * 352;
+  // Helper: retorna dbu_per_hour da instância
+  const dbuRate = (instanceKey) => inst[instanceKey]?.dbu_per_hour ?? 0;
 
-    // 4. Databricks SQL e Periféricos
-    const sqlCost = ((1 * instD16.dbu_per_hour * t.sql_compute) + (1 * instD16.vm_price_per_hour)) * sqlHours;
-    const postgre = p.peripherals.postgresql_flex;
+  // 1. Storage
+  const isBrazil = storageRegion === 'BRAZIL_SOUTH';
+  const storagePricePerGB = isBrazil
+    ? p.storage.adls_gen2.hot_lrs_gb_brl[storageRegion]
+    : p.storage.adls_gen2.hot_lrs_gb[storageRegion];
+  const storage = storageGB * (storagePricePerGB ?? 0);
 
-    const totalCalculado = storageCost + dbDev + dbProd + jobDev + jobProd + sqlCost + postgre;
+  // 2. All-Purpose DEV
+  const apDev = (apDevNodes * dbuRate(apDevInstance) * t.all_purpose * apDevHorasDbu)
+              + (apDevNodes * vmPrice(apDevInstance) * apDevHorasVM);
 
-    return {
-        lines: {
-            storage: storageCost,
-            dbDev,
-            dbProd,
-            jobDev,
-            jobProd,
-            sql: sqlCost,
-            postgre
-        },
-        totalCalculado
-    };
+  // 3. All-Purpose PROD
+  const apProd = (apProdNodes * dbuRate(apProdInstance) * t.all_purpose * apProdHorasDbu)
+               + (apProdNodes * vmPrice(apProdInstance) * apProdHorasVM);
+
+  // 4. Job Compute DEV
+  const jobDev = (jobDevNodes * dbuRate(jobDevInstance) * t.job_compute * jobDevHorasDbu)
+               + (jobDevNodes * vmPrice(jobDevInstance) * jobDevHorasVM);
+
+  // 5. Job Compute PROD
+  const jobProd = (jobProdNodes * dbuRate(jobProdInstance) * t.job_compute * jobProdHorasDbu)
+                + (jobProdNodes * vmPrice(jobProdInstance) * jobProdHorasVM);
+
+  // 6. SQL Serverless
+  const sql = (sqlNodes * dbuRate(sqlInstance) * t.sql_compute * sqlHorasDbu)
+            + (sqlNodes * vmPrice(sqlInstance) * sqlHorasVM);
+
+  // 7. Periféricos opcionais
+  const postgre   = includePostgre
+    ? (p.peripherals.postgresql_flex_d2dsv5[storageRegion] ?? 0)
+    : 0;
+  const keyVault  = includeKeyVault
+    ? (p.peripherals.key_vault_fixed[storageRegion] ?? 0)
+    : 0;
+
+  const total = storage + apDev + apProd + jobDev + jobProd + sql + postgre + keyVault;
+
+  return {
+    lines: { storage, apDev, apProd, jobDev, jobProd, sql, postgre, keyVault },
+    total,
+    currency: isBrazil ? 'BRL' : 'USD',
+  };
 };
