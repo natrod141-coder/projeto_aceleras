@@ -57,6 +57,15 @@ Instale as dependências e inicie o servidor de desenvolvimento.
 ```bash
 npm install
 npm run dev
+``` 
+
+**2. Para rodar o script de regressão:**
+Para rodar a auditoria e verificar a precisão do motor:
+Certifique-se de estar na pasta raiz do projeto.
+Execute o script no terminal:
+```bash
+   node validate.mjs 
+```
 
 ## Stack Tecnológica
 - **Front-end:** Vite + React/JavaScript (Interface visual e geração dinâmica do Guia de Preenchimento).
