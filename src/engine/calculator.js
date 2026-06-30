@@ -1,4 +1,4 @@
-import { azure_prices } from '../data/prices';
+import { azure_prices } from '../data/prices.js';
 
 /**
  * Calcula estimativa de custo Azure + Databricks.
