@@ -1,89 +1,64 @@
 # Azure Cost Estimator — Aceleras (Grupo 1)
 
 ## O Problema
-Hoje, a estimativa de custo cloud é feita manualmente pelo arquiteto
-e depois refeita do zero na calculadora oficial do provider (exigida
-para solicitar incentivo ao parceiro). Esse retrabalho gera perda de
-tempo, risco de erro e bloqueio comercial. Esta ferramenta calcula a
-estimativa internamente, com fidelidade aos valores oficiais da Azure,
-e gera [a ponte/guia de preenchimento] para a calculadora oficial.
+Todo projeto começa com a mesma pergunta: quanto vai custar na nuvem? Atualmente, a estimativa de custo cloud é feita manualmente pelo arquiteto e depois refeita do zero na calculadora oficial do provider, pois a oficial é obrigatória para solicitar incentivos comerciais. Esse retrabalho gera perda de tempo, risco de distorção na proposta e bloqueios de aprovação. 
+
+Esta ferramenta ataca essas dores atuando como um motor de cálculo de alta precisão. Ela processa as especificações da arquitetura com fidelidade aos valores oficiais da Azure e gera um **Guia de Preenchimento estruturado** na tela, levando o arquiteto a preencher a calculadora oficial de forma rápida e à prova de erros.
 
 ## Escopo (Decisões de Recorte)
 
-**Provider escolhido:** Azure + Databricks (tratado como um único
-motor de cálculo, já que o Databricks é cobrado em conjunto com a
-infra Azure subjacente).
+Em alinhamento com a diretriz de "recortar com critério: uma coisa que roda vale mais que tudo pela metade", focamos em resolver a complexidade matemática do provider mais utilizado.
 
-**Por que Azure + Databricks, e não AWS:**
-- Maior frequência real de uso confirmada por dois arquitetos
-  (Nelson; Cauã: 80% dos projetos em Azure, 90% destes com Databricks)
-- Tecnicamente mais simples: AWS+Databricks exige duas calculadoras
-  separadas; Azure+Databricks fica numa só.
+**Provider escolhido:** Azure + Databricks.
+- **Justificativa:** Maior frequência real de uso confirmada por arquitetos (80% dos projetos em Azure, 90% destes com Databricks). Além disso, o Databricks atua de forma nativa e conjunta com a infraestrutura Azure subjacente, o que torna a modelagem do motor um desafio técnico de alto valor para a operação.
 
 **Serviços modelados no MVP:**
 | Serviço | Status | Justificativa |
 |---|---|---|
-| Storage (ADLS Gen2) | ✅ Incluído | Universal nos 3 casos reais analisados |
-| Databricks — All-Purpose | ✅ Incluído | Universal; maior driver de custo |
-| Databricks — Job Compute | ✅ Incluído | Presente em 2 de 3 casos |
-| Databricks — SQL Serverless | ✅ Incluído | Presentegi em 2 de 3 casos |
-| Key Vault | ✅ Incluído (custo fixo) | Universal onde aparece, mas custo desprezível (~$0,15-0,18/mês) |
-| Azure Data Factory | ❌ Fora do MVP | Presente em apenas 1 de 3 casos reais (PRIO) |
-| PostgreSQL | ❌ Fora do MVP | Presente em apenas 1 de 3 casos reais (AMAGGI) |
-| Microsoft Fabric | ❌ Fora do MVP | Baixa frequência relativa; modelo de cobrança diferente |
+| Storage (ADLS Gen2) | ✅ Incluído | Universal nos casos reais analisados. |
+| Databricks — All-Purpose | ✅ Incluído | Universal; maior driver de custo. |
+| Databricks — Job Compute | ✅ Incluído | Presente na maioria dos casos reais. |
+| Databricks — SQL Serverless | ✅ Incluído | Estruturado para aceitar ou zerar custos de VM separadamente. |
+| PostgreSQL (Flexible) | ✅ Incluído | Suportado via flag opcional no motor. |
+| Key Vault | ✅ Incluído | Suportado via flag opcional no motor. |
+| Azure Data Factory | ❌ Fora do MVP | Frequência relativa menor; recortado para priorizar o motor Databricks. |
 
-**Premissas fixas (não expostas como input):**
+**Premissas fixas:**
 - Moeda: USD
-- Modelo de preço: sempre on-demand/pay-as-you-go (confirmado por 3
-  arquitetos — nunca reserva ou Savings Plan)
-- Licensing Program: MCA (default de qualquer calculadora Microsoft)
-- Ambientes: configurável (1 a 3). Dev e Prod como padrão; Hom é
-  opcional, não apareceu nos 2 casos reais usados como gabarito.
+- Modelo de preço: Pay-as-you-go (on-demand), confirmado como o padrão nas propostas iniciais.
+- Ambientes: Granularidade completa (Dev, Homologação e Prod), com a inteligência de zerar ambientes inativos caso a arquitetura do cliente (como o caso AMAGGI) contemple apenas Produção.
 
 ## Metodologia de Validação
 
-Seguimos o método de validação progressiva: hipótese → teste contra
-casos reais → produtização. Coletamos 3 estimativas reais já fechadas
-(PRIO, AMAGGI, Simprise/Simpress) diretamente das calculadoras oficiais
-dos arquitetos, extraindo os parâmetros de input (capacidade, tipo de
-instância, horas) e o custo oficial resultante de cada linha de serviço.
-Os preços unitários usados no motor (`prices.js`) foram extraídos
-diretamente desses casos reais, não de documentação genérica — para
-garantir que a base de cálculo parte do mesmo número que o parceiro vê.
+Seguimos o método de validação progressiva (Hipótese → Teste → Produtização). O núcleo do projeto é o nosso motor de cálculo modular (`calculator.js`), que separa rigorosamente as horas de processamento (DBU) do custo de infraestrutura (VM).
+
+Para atestar a regra de negócio, construímos um script de regressão automatizado (`validate.mjs`). Extraímos os parâmetros exatos de arquiteturas reais fechadas (PRIO e AMAGGI) e submetemos ao nosso motor. O sistema de testes foi configurado com uma trava de tolerância rigorosa de ±5% em relação ao gabarito oficial gerado pelos arquitetos.
 
 ## Resultados de Validação
 
-**PRIO:**
-| Ambiente | App | Gabarito oficial | Diferença |
-|---|---|---|---|
-| DEV | $126,73 | [CONFIRMAR] | [CONFIRMAR] |
-| PROD | $1.928,68 | [CONFIRMAR] | [CONFIRMAR] |
-| **Total** | **$2.634,02** | **$2.653,80** | **$19,78 (0,8%)** |
+Os testes automatizados provam a fidelidade do motor contra as estimativas oficiais do mundo real:
 
-[CONFIRMAR] Causa raiz exata da diferença de $19,78 — breakdown linha
-a linha pendente de confirmação (ver nota abaixo).
+| Caso de Uso | Calculado pelo Motor | Gabarito Oficial | Diferença | Status (Tol. 5%) |
+|---|---|---|---|---|
+| **PRIO** | $2.628,62 | $2.653,80 | -0.9% | ✅ PASSOU |
+| **AMAGGI** | $6.284,14 | $6.223,25 | +1.0% | ✅ PASSOU |
 
-**AMAGGI:** [pendente — segunda validação]
+*Nota: O caso AMAGGI atestou a capacidade do motor de reconhecer instâncias Databricks SQL Serverless, onde a infraestrutura de VM nativa do provider não é cobrada do cliente.*
 
-## O Que Faríamos Diferente
-- [a preencher conforme o time for percebendo limitações]
-- Possível candidato: preço de storage fixo por GB no MVP, quando a
-  Azure usa tiers progressivos de volume — simplificação consciente,
-  a detalhar se confirmada. 
+## O Que Faríamos Diferente (Próximos Passos)
 
-## Limitações Conhecidas
-- Não cobre Data Factory, PostgreSQL ou Fabric (fora do escopo, por
-  baixa frequência relativa nos 3 casos reais analisados).
-- [CONFIRMAR] Esclarecer se o ADF foi ou não incluído no cálculo de
-  PROD do PRIO — necessário para a seção de Resultados acima.
-- Ambiente de Homologação tratado como opcional, não obrigatório, 
-  decisão baseada em ausência de Hom nos 2 casos reais, mesmo as
-  entrevistas apontando Hom como padrão recomendado.
+- **Integração com a Azure Retail Prices API:** No escopo atual, os preços base da Azure foram mantidos estáticos (hardcoded no arquivo `prices.js`). Esta foi uma decisão consciente para blindar o MVP contra instabilidades de rede e garantir uma ferramenta 100% funcional no prazo de entrega. Como evolução natural (Roadmap v2.0), o sistema consumirá a API pública da Microsoft em tempo real, eliminando qualquer defasagem de preços no futuro sem a necessidade de intervenção no código.
+- **Tiers Progressivos de Storage:** O cálculo de ADLS Gen2 utiliza um valor fixo por GB no MVP. Em uma próxima versão, implementaríamos a lógica de desconto progressivo por volume de dados hospedado.
 
-## Como Rodar
-[ a preencher ]
+## Como Rodar o Projeto
 
-## Stack
-- Vite + JavaScript
-- Preços hardcoded em `prices.js`, extraídos de casos reais (PRIO,
-  AMAGGI, Simprise)
+**1. Para rodar a Interface Gráfica (Front-end):**
+Instale as dependências e inicie o servidor de desenvolvimento.
+```bash
+npm install
+npm run dev
+
+## Stack Tecnológica
+- **Front-end:** Vite + React/JavaScript (Interface visual e geração dinâmica do Guia de Preenchimento).
+- **Back-end / Motor:** Node.js (Lógica matemática isolada no `calculator.js` e testes de regressão automatizados no `validate.mjs`).
+- **Dados:** Estrutura modular fixa no `prices.js`, atuando como base de dados estática provisória para o MVP, com preços reais extraídos de propostas fechadas.
