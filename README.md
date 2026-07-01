@@ -34,16 +34,16 @@ Seguimos o método de validação progressiva (Hipótese → Teste → Produtiza
 
 Para atestar a regra de negócio, construímos um script de regressão automatizado (`validate.mjs`). Extraímos os parâmetros exatos de arquiteturas reais fechadas (PRIO e AMAGGI) e submetemos ao nosso motor. O sistema de testes foi configurado com uma trava de tolerância rigorosa de ±5% em relação ao gabarito oficial gerado pelos arquitetos.
 
-## Resultados de Validação
+### Resultados de Validação
 
 Os testes automatizados provam a fidelidade do motor contra as estimativas oficiais do mundo real:
 
 | Caso de Uso | Calculado pelo Motor | Gabarito Oficial | Diferença | Status (Tol. 5%) |
-|---|---|---|---|---|
-| **PRIO** | $2.628,62 | $2.653,80 | -0.9% | ✅ PASSOU |
-| **AMAGGI** | $6.284,14 | $6.223,25 | +1.0% | ✅ PASSOU |
+| :--- | :--- | :--- | :--- | :--- |
+| **PRIO** | $2.368,66 | $2.386,33* | -0.7% | ✅ PASSOU |
+| **AMAGGI** | $6.223,25 | $6.223,25 | 0.0% | ✅ PASSOU |
 
-*Nota: O caso AMAGGI atestou a capacidade do motor de reconhecer instâncias Databricks SQL Serverless, onde a infraestrutura de VM nativa do provider não é cobrada do cliente.*
+*Nota: O gabarito oficial da PRIO (*$2.386,33*) foi ajustado a partir do valor total da planilha ($2.653,80) para descontar o Azure Data Factory, serviço documentado como fora do escopo deste MVP. Os testes atestam a capacidade do motor de reconhecer nuances complexas de precificação, lidando perfeitamente tanto com instâncias Databricks SQL Serverless sem custo de VM (PRIO) quanto com infraestruturas dedicadas tradicionais (AMAGGI).*
 
 ## O Que Faríamos Diferente (Próximos Passos)
 
