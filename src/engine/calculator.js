@@ -74,12 +74,12 @@ export const calculateEstimate = (input) => {
   const storage = storageGB * (storagePricePerGB ?? 0);
 
   // 2. All-Purpose DEV
-  const apDev = (apDevNodes * dbuRate(apDevInstance) * t.all_purpose * apDevHorasDbu)
-              + (apDevNodes * vmPrice(apDevInstance) * apDevHorasVM);
+const apDev = (apDevNodes * dbuRate(apDevInstance) * (t.all_purpose ?? 0) * apDevHorasDbu)
++ (apDevNodes * vmPrice(apDevInstance) * apDevHorasVM);
 
-  // 3. All-Purpose PROD
-  const apProd = (apProdNodes * dbuRate(apProdInstance) * t.all_purpose * apProdHorasDbu)
-               + (apProdNodes * vmPrice(apProdInstance) * apProdHorasVM);
+// 3. All-Purpose PROD
+const apProd = (apProdNodes * dbuRate(apProdInstance) * (t.all_purpose ?? 0) * apProdHorasDbu)
++ (apProdNodes * vmPrice(apProdInstance) * apProdHorasVM);
 
   // 4. Job Compute DEV
   const jobDev = (jobDevNodes * dbuRate(jobDevInstance) * t.job_compute * jobDevHorasDbu)
@@ -90,15 +90,15 @@ export const calculateEstimate = (input) => {
                 + (jobProdNodes * vmPrice(jobProdInstance) * jobProdHorasVM);
 
   // 6. SQL Serverless
-  const sql = (sqlNodes * dbuRate(sqlInstance) * t.sql_compute * sqlHorasDbu)
-            + (sqlNodes * vmPrice(sqlInstance) * sqlHorasVM);
+const sql = (sqlNodes * dbuRate(sqlInstance) * (t.sql_compute ?? 0) * sqlHorasDbu)
++ (sqlNodes * vmPrice(sqlInstance) * sqlHorasVM);          
 
   // 7. Periféricos opcionais
   const postgre   = includePostgre
-    ? (p.peripherals.postgresql_flex_d2dsv5[storageRegion] ?? 0)
+    ? (p.peripherals.postgresql_flex_d2dsv5[computeRegion] ?? 0)
     : 0;
   const keyVault  = includeKeyVault
-    ? (p.peripherals.key_vault_fixed[storageRegion] ?? 0)
+    ? (p.peripherals.key_vault_fixed[computeRegion] ?? 0)
     : 0;
 
   const total = storage + apDev + apProd + jobDev + jobProd + sql + postgre + keyVault;

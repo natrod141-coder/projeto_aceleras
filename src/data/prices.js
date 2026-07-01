@@ -49,7 +49,7 @@ export const azure_prices = {
   },
 
   peripherals: {
-    postgresql_flex_d2dsv5: { EAST_US: 212.74 }, // Calibrado: AMAGGI
+    postgresql_flex_d2dsv5: { EAST_US: 212.74, WEST_US: 212.74 }, // Calibrado: AMAGGI
     key_vault_fixed:        { EAST_US: 0.18, BRAZIL_SOUTH: null },
     adf_v2_per_activity:    { EAST_US: null }, // Cortado do MVP — ver log de decisões
   },
