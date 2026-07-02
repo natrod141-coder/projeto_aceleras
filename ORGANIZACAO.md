@@ -33,12 +33,26 @@ Para acelerar a entrega e transformar as decisões da Semana 1 em código, divid
 - Estruturação da lógica do motor de cálculo (`calculator.js`).
 - Mapeamento das regras do Databricks (separação de custos de DBU vs. infraestrutura de VM).
 - Construção do script de testes automatizados (`validate.mjs`) operando 2 dos 3 casos reais coletados.
-- Calibragem do motor para atingir precisão máxima, resultando em desvios quase nulos (-0.9% na PRIO e +1.0% na AMAGGI).
+- Calibragem do motor para atingir precisão máxima, porém com as restrições do MVP (Gabarito Reduzido), nós chegamos nos números -2,1% (PRIO) e +4,2% (AMAGGI).
+- Refinamento lógico e estrutural do Parser de Preenchimento Automático. Aplicação de Expressões Regulares (Regex) avançadas — como Negative Lookahead para evitar falsos positivos entre memória RAM e Storage — e reestruturação do algoritmo de fatiamento de texto (Block Slicing) para garantir a extração isolada e precisa de dados de arquiteturas complexas.
 
 **Cauã Souza Almeida (Front-end e Interface):**
 - Construção da interface visual interativa (MVP v0.1 e v0.2).
 - Mapeamento da experiência do arquiteto, acomodando os inputs de horas (mitigando o risco de *Data Computing* identificado no Dia 2).
 - Construção do painel "Guia de Preenchimento", consolidando a decisão de UX tomada após o *spike* do Dia 3.
+- Implementação da Killer Feature do MVP: O Preenchimento Automático (BETA). Criação de um parser de texto capaz de ler PDFs ou propostas brutas e traduzir em configurações de estado no React, antecipando uma visão de longo prazo do negócio já para a entrega do MVP.
 
 ### Integração (O "Handshake")
 O ponto crítico foi alinhar o contrato de dados entre a interface e o motor. Quando o Front-end evoluiu para acomodar cenários complexos (como o Databricks SQL Serverless que não cobra VM nativa), realizamos uma força-tarefa para atualizar o `validate.mjs`. Isso garantiu que o sistema não sofresse regressão de cálculo durante a junção das duas partes, cravando os gabaritos oficiais.
+
+### Fase Final: QA e Refinamento do Parser
+
+A introdução do Preenchimento Automático exigiu uma rodada intensiva de testes de stress (QA) utilizando os casos reais da PRIO e AMAGGI para garantir que o robô de leitura não gerasse falsos positivos. Durante esta fase, resolvemos três grandes desafios de engenharia:
+
+- O Isolamento de Regiões (Block Slicing): O parser inicial apresentava vazamento de escopo (ex: o Job Compute "roubava" a região do SQL Serverless). Implementamos uma lógica de fatiamento de texto (split com regex) baseada em quebras de bloco e numeração de listas, garantindo que cada serviço fosse lido em seu próprio casulo textual.
+
+- Falsos Positivos de Hardware vs. Storage: O script estava confundindo a memória RAM da máquina virtual (ex: "32 GB RAM") com o disco de Storage. Resolvemos isso aplicando Negative Lookahead nas Expressões Regulares ((?!\s*ram)), ensinando o robô a ignorar o termo GB se fosse seguido de RAM.
+
+- Gestão de Estado React (Sticky State): Identificamos que alternar entre um projeto com PostgreSQL (AMAGGI) e um sem (PRIO) deixava o banco de dados "preso" na tela. Corrigimos o fluxo de atualização de estados no App.jsx, forçando o reset limpo de todos os componentes booleanos a cada novo clique no botão de automação.
+
+- Resolução de Persistência de Estado (Sticky State) no Frontend: Durante os testes de stress, identificamos que a interface retinha valores de serviços de escopos anteriores (ex: SQL Serverless ou PostgreSQL vazando de um cliente para outro). Para solucionar isso, reescrevemos a função de mesclagem de estado (mergeParsedConfig) no React, implementando uma rotina de reset estrito. Agora, o sistema força o desligamento (booleano false) de qualquer serviço que não seja explicitamente encontrado pelo parser no novo texto, garantindo a blindagem matemática total ao alternar entre projetos

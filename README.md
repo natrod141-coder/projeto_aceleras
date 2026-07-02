@@ -24,9 +24,10 @@ O processo hoje tem dois gargalos que se somam:
 
 Uma ferramenta web interna onde o arquiteto descreve a arquitetura **uma vez** — provider, serviços, volumetria, ambientes — e recebe de volta:
 
-1. **Estimativa de custo mensal** fiel aos valores da calculadora oficial da Azure
-2. **Breakdown por serviço e por ambiente** (DEV / HOM / PROD)
-3. **Guia de preenchimento** com os parâmetros exatos para colar na calculadora oficial, ambiente por ambiente
+1. **Preenchimento Automático (Funcionalidade BETA):** Um parser inteligente que lê o texto bruto de uma arquitetura (copiado de um PDF ou proposta) e pré-preenche os serviços, instâncias e volumetria automaticamente.
+2. **Estimativa de custo mensal** fiel aos valores da calculadora oficial da Azure.
+3. **Breakdown por serviço e por ambiente** (DEV / HOM / PROD).
+4. **Guia de preenchimento** com os parâmetros exatos para colar na calculadora oficial, ambiente por ambiente.
 
 ---
 
@@ -115,9 +116,8 @@ Caso: AMAGGI
   Gabarito:   $4364.67 (MVP, excluindo itens fora do escopo)
   Diferença:  $181.37  (4.2%)
   Status:     ✅ PASSOU  (tolerância: ±5%)
-  Nota:       Linha 6 do PDF (D16AV4 All-Purpose 730h, $1858.58) excede as 4 linhas que o MVP cobre.
+ Nota:       O caso oficial da AMAGGI possui três clusters All-Purpose e dois clusters Job Compute. O MVP suporta apenas um cluster de cada tipo por ambiente. Para a validação foi removido o cluster adicional D16AV4 (US$ 1.858,58), resultando em um gabarito reduzido de US$ 4.364,67.
   Oficial completo: $6223.25
-
 ================================================================
 ✅ Todos os casos dentro da tolerância definida.
 ```
@@ -138,8 +138,8 @@ Com os 5 workloads do caso AMAGGI, montamos um sistema linear determinado com 5 
 
 | Caso | Total Calculado | Total Oficial | Divergência |
 |---|---|---|---|
-| PRIO | $2.533,28 | $2.653,80 | −4,5% (Sem ADF)|
-| AMAGGI | $4.546,04 | $6.223,25 | -27% (Sem linha SQL extra) |
+| PRIO | $2.491,68 | $2.544,72 | -2,1% (Sem ADF) |
+| AMAGGI | $4.546,04 | $4.364,67 | +4,2% (Sem linha SQL extra) |
 
 Os dois casos estão em **lados opostos** da linha (um abaixo, um acima), indicando que o modelo não está sistematicamente enviesado — a variação residual é distribuída, não acumulada.
 
@@ -175,15 +175,10 @@ A taxa de Storage (`$0,02157972/GB` em East US) foi calibrada no caso AMAGGI (72
 
 **O que seria feito com mais tempo:** Usar a [Azure Retail Prices API](https://prices.azure.com/api/retail/prices) para puxar os tiers de volume reais do meter `Hot LRS Capacity` e modelar a progressividade exata.
 
-### 2. SQL Serverless: fórmula aproximada via workaround
-O SQL Serverless da Azure tem cobrança por tamanho de cluster fixo (XSmall = 6 DBU/h, sem componente de VM), diferente dos outros workloads. No MVP, o campo é preenchido via combinação de nós/instância que produz o mesmo número de DBU — funcionalmente correto no resultado, mas conceitualmente impreciso no input. O usuário informa "4 nós × D8AV4 (1,5 DBU)" em vez de "XSmall (6 DBU direto)".
-
-**O que seria feito com mais tempo:** Criar seletor dedicado (XSmall / Small / Medium) com preço por DBU específico do SQL Serverless (~$0,70/DBU-h).
-
-### 3. Key Vault: custo aplicado em todos os ambientes
+### 2. Key Vault: custo aplicado em todos os ambientes
 O toggle de Key Vault aplica o custo fixo ($0,18) nos 3 ambientes (DEV + HOM + PROD), independente de HOM estar ativo. Em projetos sem HOM, o total fica $0,18 acima do real.
 
-### 4. Regiões com cobertura parcial
+### 3. Regiões com cobertura parcial
 Alguns preços de VM só estão calibrados para as regiões dos casos reais disponíveis. Regiões fora de East US / West US / Brazil South podem retornar `$0` silenciosamente.
 
 **O que seria feito com mais tempo:** Criar um Calculation Engine desacoplado dos serviços e um PricingProvider desacoplado da fonte de preços para facilitar adicionar novos serviços (Azure SQL, Fabric, AWS), permitindo trocar o catálogo local por uma API no futuro sem reescrever o motor.
@@ -197,13 +192,11 @@ Os 2 casos disponíveis foram usados tanto na calibração quanto na validação
 
 1. **Azure Retail Prices API em vez de tabela estática** — elimina a necessidade de recalibração manual quando a Microsoft atualiza preços. A API é pública, sem autenticação, e retorna JSON estruturado por meter/região.
 
-2. **SQL Serverless com seletor de tamanho nativo** — a interface deveria refletir exatamente como a calculadora da Azure funciona: selecionar "XSmall / Small / Medium", não instância de VM.
+2. **Geração do link de preenchimento da calculadora oficial** — a exploração do DevTools confirmou que o link compartilhável da Azure é gerado via POST (ID no servidor, não estado na URL). Com mais tempo, investigaríamos automação de preenchimento via Playwright/Puppeteer, dado que agora conhecemos exatamente quais campos precisam ser preenchidos e em que ordem.
 
-3. **Geração do link de preenchimento da calculadora oficial** — a exploração do DevTools confirmou que o link compartilhável da Azure é gerado via POST (ID no servidor, não estado na URL). Com mais tempo, investigaríamos automação de preenchimento via Playwright/Puppeteer, dado que agora conhecemos exatamente quais campos precisam ser preenchidos e em que ordem.
+3. **Tiered pricing para Storage** — modelar as faixas de desconto por volume da Azure em vez de taxa única.
 
-4. **Tiered pricing para Storage** — modelar as faixas de desconto por volume da Azure em vez de taxa única.
-
-5. **Integração com o sistema interno de propostas da Dataside** — visão de longo prazo mencionada pelo Oscar: a ferramenta lê o escopo em texto da proposta e pré-preenche a estimativa automaticamente.
+4. **Suporte a múltiplos clusters por ambiente** — o MVP atual suporta apenas a configuração de um cluster All-Purpose e um Job Compute por ambiente. Para refletir fielmente arquiteturas mais complexas (como os três clusters simultâneos do caso AMAGGI), a interface e a gestão de estado precisariam evoluir para permitir a adição dinâmica de múltiplos clusters em formato de lista.
 
 ---
 

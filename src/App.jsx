@@ -127,10 +127,15 @@ const mergeParsedConfig = (old, parsed, found) => ({
   ...(found.storageGB      ? { storageGB:      parsed.storageGB }      : {}),
   ...(found.storageEnabled ? { storageEnabled: parsed.storageEnabled } : {}),
   ...(found.tier           ? { tier:           parsed.tier }           : {}),
-  ...(found.postgre        ? { postgre:        parsed.postgre }        : {}),
-  ...(found.keyVault       ? { keyVault:       parsed.keyVault }       : {}),
+  
+  // ✅ As linhas cruciais do Databricks que haviam ficado de fora:
   allPurpose: mergeWorkload(old.allPurpose, parsed.allPurpose ?? {}, found.allPurpose),
   jobCompute: mergeWorkload(old.jobCompute, parsed.jobCompute ?? {}, found.jobCompute),
+
+  // ✅ A correção do fantasma (força o desligamento se não estiver no texto):
+  postgre:  found.postgre  ? parsed.postgre  : false,
+  keyVault: found.keyVault ? parsed.keyVault : false,
+  
   sqlCompute: found.sqlCompute
     ? {
         ...old.sqlCompute,
@@ -139,7 +144,7 @@ const mergeParsedConfig = (old, parsed, found) => ({
         hom:  { ...old.sqlCompute.hom,  ...(parsed.sqlCompute?.hom  ?? {}) },
         dev:  { ...old.sqlCompute.dev,  ...(parsed.sqlCompute?.dev  ?? {}) },
       }
-    : old.sqlCompute,
+    : { ...old.sqlCompute, enabled: false },
 });
 
 // ─── Cálculo ──────────────────────────────────────────────────────────────────
