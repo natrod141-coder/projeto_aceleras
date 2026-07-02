@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { parseProject } from './parser/naturalLanguageParser';
 import { calculateEstimate } from './engine/calculator';
 
 // ─── Constantes ────────────────────────────────────────────────────────────────
@@ -106,6 +107,40 @@ const fmt = (v) =>
 
 const regionLabel = (v) =>
   [...STORAGE_REGIONS, ...COMPUTE_REGIONS].find(r => r.value === v)?.label ?? v;
+
+const mergeWorkload = (old, parsed, apply) => {
+  if (!apply) return old;
+  return {
+    ...old,
+    enabled: parsed.enabled ?? old.enabled,
+    region:  parsed.region  ?? old.region,
+    prod: { ...old.prod, ...(parsed.prod ?? {}) },
+    hom:  { ...old.hom,  ...(parsed.hom  ?? {}) },
+    dev:  { ...old.dev,  ...(parsed.dev  ?? {}) },
+  };
+};
+
+const mergeParsedConfig = (old, parsed, found) => ({
+  ...old,
+  ...(found.projectName    ? { projectName:    parsed.projectName }    : {}),
+  ...(found.storageRegion  ? { storageRegion:  parsed.storageRegion }  : {}),
+  ...(found.storageGB      ? { storageGB:      parsed.storageGB }      : {}),
+  ...(found.storageEnabled ? { storageEnabled: parsed.storageEnabled } : {}),
+  ...(found.tier           ? { tier:           parsed.tier }           : {}),
+  ...(found.postgre        ? { postgre:        parsed.postgre }        : {}),
+  ...(found.keyVault       ? { keyVault:       parsed.keyVault }       : {}),
+  allPurpose: mergeWorkload(old.allPurpose, parsed.allPurpose ?? {}, found.allPurpose),
+  jobCompute: mergeWorkload(old.jobCompute, parsed.jobCompute ?? {}, found.jobCompute),
+  sqlCompute: found.sqlCompute
+    ? {
+        ...old.sqlCompute,
+        enabled: parsed.sqlCompute?.enabled ?? old.sqlCompute.enabled,
+        prod: { ...old.sqlCompute.prod, ...(parsed.sqlCompute?.prod ?? {}) },
+        hom:  { ...old.sqlCompute.hom,  ...(parsed.sqlCompute?.hom  ?? {}) },
+        dev:  { ...old.sqlCompute.dev,  ...(parsed.sqlCompute?.dev  ?? {}) },
+      }
+    : old.sqlCompute,
+});
 
 // ─── Cálculo ──────────────────────────────────────────────────────────────────
 
@@ -534,6 +569,42 @@ function GuiaPreenchimento({ cfg, breakdown, totals, currency }) {
 
 export default function App() {
   const [cfg, setCfg] = useState(INITIAL);
+  const [rawInput, setRawInput] = useState('');
+  const [parserMessage, setParserMessage] = useState(null);
+
+  const handleAutoFill = () => {
+    try {
+      if (!rawInput?.trim()) {
+        setParserMessage({ type: 'error', text: '❌ Cole um texto antes de processar.' });
+        return;
+      }
+
+      const { config, found, extracted, warnings } = parseProject(rawInput);
+      const hasFound = Object.values(found ?? {}).some(Boolean);
+
+      setCfg(old => mergeParsedConfig(old, config, found));
+
+      if (!hasFound) {
+        setParserMessage({
+          type: 'error',
+          text: '⚠️ Nenhum recurso identificado — valores atuais mantidos.',
+          summary: [],
+          warnings: warnings ?? [],
+        });
+        return;
+      }
+
+      setParserMessage({
+        type: 'success',
+        text: '✅ Configuração preenchida automaticamente.',
+        summary: extracted ?? [],
+        warnings: warnings ?? [],
+      });
+    } catch (err) {
+      console.error(err);
+      setParserMessage({ type: 'error', text: '❌ Não foi possível interpretar o texto.' });
+    }
+  };
 
   const results = useMemo(() => {
     try { return runCalc(cfg); } catch (e) { console.error(e); return null; }
@@ -576,11 +647,59 @@ export default function App() {
           <h1 style={S.headerTitle}>Azure Cost Estimator</h1>
           <p style={S.headerSub}>Dataside · Azure + Databricks · Preço de lista on-demand</p>
         </div>
-        <span style={S.badge}>MVP v0.5</span>
+        <span style={S.badge}>MVP v0.6</span>
       </div>
 
       <div style={S.body}>
         <div>
+          {/* Preenchimento Automático */}
+          <div style={S.card}>
+            <div style={S.cardHead}>
+              <span style={S.cardTitle()}>Preenchimento Automático (Beta)</span>
+            </div>
+            <div style={S.cardBody}>
+              <Field label="Cole aqui o texto do Azure Calculator ou PDF">
+                <textarea
+                  style={{ ...S.input, height: 180, resize: 'vertical' }}
+                  value={rawInput}
+                  onChange={e => setRawInput(e.target.value)}
+                  placeholder="Cole aqui todo o conteúdo do PDF ou da calculadora Azure..."
+                />
+              </Field>
+              <button
+                style={{ ...S.openCalcBtn, marginTop: 15, cursor: 'pointer', border: 'none' }}
+                onClick={handleAutoFill}
+              >
+                🤖 Preencher automaticamente
+              </button>
+              {parserMessage && (
+                <>
+                  <p style={{
+                    marginTop: 10,
+                    color: parserMessage.type === 'success' ? C.green : C.red,
+                    fontSize: 12,
+                    marginBottom: 0,
+                  }}>
+                    {parserMessage.text}
+                  </p>
+                  {(parserMessage.summary?.length ?? 0) > 0 && (
+                    <div style={{ ...S.copyBox, marginTop: 8, fontSize: 10 }}>
+                      <strong>Recursos identificados:</strong>
+                      {(parserMessage.summary ?? []).map((item, i) => (
+                        <div key={i}>• {item}</div>
+                      ))}
+                    </div>
+                  )}
+                  {(parserMessage.warnings?.length ?? 0) > 0 && (
+                    <p style={{ ...S.hint, marginTop: 6, fontStyle: 'normal' }}>
+                      {(parserMessage.warnings ?? []).join(' · ')}
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+
           {/* Config global */}
           <div style={S.card}>
             <div style={S.cardHead}><span style={S.cardTitle()}>Configuração do Projeto</span></div>
