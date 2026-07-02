@@ -109,7 +109,7 @@ const CASOS = [
     gabaritoOficial: 6223.25,
     gabaritoMVP:     4364.67, // sem linha SQL extra (D16AV4 All-Purpose 730h = $1858.58)
     toleranciaOverride: 5,
-    nota: 'Linha 6 do PDF (D16AV4 All-Purpose 730h, $1858.58) excede as 4 linhas que o MVP cobre.',
+    nota: 'O caso oficial da AMAGGI possui três clusters All-Purpose e dois clusters Job Compute. O MVP suporta apenas um cluster de cada tipo por ambiente. Para a validação foi removido o cluster adicional D16AV4 (US$ 1.858,58), resultando em um gabarito reduzido de US$ 4.364,67.',
   },
 
 ];
