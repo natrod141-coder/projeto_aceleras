@@ -52,11 +52,11 @@ export const azure_prices = {
     instances: {
       // vm_price_per_hour: custo da infra Azure por hora (separado do DBU Databricks)
       // Derivados por engenharia reversa: vm = (custo_total - dbu_total) / (nodes × horasVM)
-      D3V2:  { dbu_per_hour: 0.75, vm_price_per_hour: { WEST_US: 0.279 } },
+      D3V2:  { dbu_per_hour: 0.75, vm_price_per_hour: { WEST_US: 0.279, EAST_US: 0.229 } },
       // derivado AMAGGI DEV (West US): (243.41 - 1*0.75*0.55*352) / (1*352) = 0.279
-      DS3V2: { dbu_per_hour: 0.75, vm_price_per_hour: { BRAZIL_SOUTH: 0.0 } },
+      DS3V2: { dbu_per_hour: 0.75, vm_price_per_hour: { BRAZIL_SOUTH: 0.0, EAST_US: 0.293, WEST_US: 0.312  } },
       // Simpress: VM embutida no preço DBU Standard — valor real pendente de gabarito separado
-      D4AV4: { dbu_per_hour: 0.75, vm_price_per_hour: { EAST_US: 0.192 } },
+      D4AV4: { dbu_per_hour: 0.75, vm_price_per_hour: { EAST_US: 0.192, WEST_US: 0.192 } },
       // derivado PRIO DEV (East US): (207.60 - 1*0.75*0.55*352) / (1*325) = 0.192
       D8AV4: { dbu_per_hour: 1.5,  vm_price_per_hour: { EAST_US: 0.384, WEST_US: 0.448 } },
       // EAST_US: derivado PRIO AP PROD (East US): (830.40 - 2*1.5*0.55*352) / (2*325) = 0.384

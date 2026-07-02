@@ -186,6 +186,8 @@ O toggle de Key Vault aplica o custo fixo ($0,18) nos 3 ambientes (DEV + HOM + P
 ### 4. Regiões com cobertura parcial
 Alguns preços de VM só estão calibrados para as regiões dos casos reais disponíveis. Regiões fora de East US / West US / Brazil South podem retornar `$0` silenciosamente.
 
+**O que seria feito com mais tempo:** Criar um Calculation Engine desacoplado dos serviços e um PricingProvider desacoplado da fonte de preços para facilitar adicionar novos serviços (Azure SQL, Fabric, AWS), permitindo trocar o catálogo local por uma API no futuro sem reescrever o motor.
+
 ### Validação circular
 Os 2 casos disponíveis foram usados tanto na calibração quanto na validação — o validate.mjs prova consistência matemática, não independência estatística. Validação cega com terceiro caso é o item #1 do roadmap.
 
