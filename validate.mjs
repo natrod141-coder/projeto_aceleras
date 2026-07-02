@@ -1,118 +1,147 @@
 import { calculateEstimate } from './src/engine/calculator.js';
 
+// ─── Configuração ──────────────────────────────────────────────────────────────
 const TOLERANCIA_PCT = 5;
 
+// ─── Helper: chama o calculator por ambiente e soma ────────────────────────────
+// Espelha exatamente o que o App.jsx faz em runCalc()
+const calcTotal = (ambientes) =>
+  ambientes.reduce((soma, input) => soma + calculateEstimate(input).total, 0);
+
+// ─── Casos de validação ────────────────────────────────────────────────────────
+
 const CASOS = [
-  {
-  nome: 'PRIO',
-  input: {
-    storageGB: 11000,           // 1TB DEV + 10TB PROD
-    storageRegion: 'EAST_US',
-    computeRegion: 'EAST_US',
-    tier: 'premium',
 
-    // All-Purpose DEV
-    apDevInstance: 'D4AV4',     // Na planilha é D4AV4
-    apDevNodes: 1,
-    apDevHorasVM: 325,
-    apDevHorasDbu: 352,
-    
-    // All-Purpose PROD
-    apProdInstance: 'D8AV4',
-    apProdNodes: 2,
-    apProdHorasVM: 325,
-    apProdHorasDbu: 352,
-    
-    // Job Compute PROD
-    jobProdInstance: 'D8AV4',
-    jobProdNodes: 1,
-    jobProdHorasVM: 300,
-    jobProdHorasDbu: 730,       // Na planilha o DBU roda 730h
-    
-    // Job Compute DEV (Inexistente na planilha)
-    jobDevInstance: 'D4AV4',
-    jobDevNodes: 0,
-    jobDevHorasVM: 0,
-    jobDevHorasDbu: 0,
-    
-    // SQL Serverless
-    sqlInstance: 'D8AV4',
-    sqlNodes: 4,                // 4 nós * 1.5 DBU = 6 DBU por cluster
-    sqlHorasVM: 0,              // Serverless não cobra VM nativa no escopo
-    sqlHorasDbu: 176,
-    
-    // Periféricos
-    includePostgre: false,      // Planilha não possui Postgres (apenas Data Factory, fora do MVP)
-    includeKeyVault: true       
-  },
-  // Gabarito ajustado: $2653.80 original - $109.07 (Data Factory fora do MVP) - Ajuste de tier SQL
-  gabaritoOficial: 2386.33      
-},
+  // ─── PRIO ────────────────────────────────────────────────────────────────────
+  // Gabarito oficial PDF: $2.653,80
+  // Linhas do PDF:
+  //   AP  PROD: 2× D8AV4, East US, 325h VM / 352h DBU  → $830.40
+  //   AP  DEV:  1× D4AV4, East US, 325h VM / 352h DBU  → $207.60
+  //   Job PROD: 1× D8AV4, West US, 300h VM / 730h DBU  → $462.90
+  //   SQL PROD: XSmall, 176h                            → $739.20
+  //   Storage PROD: 10 TB East US                       → $251.22
+  //   Key Vault DEV + PROD:                             → $0.36
+  //   ADF DEV + PROD:                                   → $109.08  ← FORA DO MVP
+  // Gap esperado: ~$109 (só ADF, fora do MVP).
+  // FIX (região mista): antes o motor usava uma computeRegion única, então o
+  // All-Purpose (que no PDF roda em East US) era forçado pra West US (onde o
+  // Job Compute roda de fato) — isso sozinho explicava ~$52 do gap e obrigou a
+  // dobrar a tolerância pra 10% pra "passar". Agora AP e Job têm cada um sua
+  // própria região (apComputeRegion / jobComputeRegion), reproduzindo a
+  // planilha real linha por linha. Tolerância volta para os 5% padrão.
   {
-  nome: 'AMAGGI',
-  input: {
-    storageGB: 72000,
-    storageRegion: 'EAST_US',
-    computeRegion: 'WEST_US',   // Planilha revela que o Databricks é West US
-    tier: 'premium',
-
-    // All-Purpose DEV
-    apDevInstance: 'D3V2',      // Na planilha: 1 nó D3V2
-    apDevNodes: 1,
-    apDevHorasVM: 352,
-    apDevHorasDbu: 352,
-    
-    // All-Purpose PROD
-    apProdInstance: 'D8AV4',    // Na planilha: 2 nós D8AV4
-    apProdNodes: 2,
-    apProdHorasVM: 352,
-    apProdHorasDbu: 352,
-    
-    // Job Compute DEV
-    jobDevInstance: 'D8AV4',    // Na planilha: 1 nó D8AV4
-    jobDevNodes: 1,
-    jobDevHorasVM: 352,
-    jobDevHorasDbu: 730,
-    
-    // Job Compute PROD
-    jobProdInstance: 'D16AV4',  // Na planilha: 1 nó D16AV4
-    jobProdNodes: 1,
-    jobProdHorasVM: 352,
-    jobProdHorasDbu: 730,
-    
-    // SQL (Infra dedicada, não serverless)
-    sqlInstance: 'D16AV4',      
-    sqlNodes: 1,
-    sqlHorasVM: 730,            // AMAGGI paga pela VM do SQL (730h)
-    sqlHorasDbu: 730,
-    
-    // Periféricos
-    includePostgre: true,       // Planilha possui PostgreSQL (linha 8)
-    includeKeyVault: false      // Planilha NÃO possui Key Vault
+    nome: 'PRIO',
+    ambientes: [
+      // PROD
+      {
+        storageGB:        10000,
+        storageRegion:   'EAST_US',
+        apComputeRegion: 'EAST_US',   // AP PROD está em East US no PDF
+        jobComputeRegion:'WEST_US',   // Job PROD está em West US no PDF
+        tier:            'premium',
+        apProdInstance:  'D8AV4', apProdNodes: 2, apProdHorasVM: 325, apProdHorasDbu: 352,
+        jobProdInstance: 'D8AV4', jobProdNodes: 1, jobProdHorasVM: 300, jobProdHorasDbu: 730,
+        sqlClusterSize:  'XSMALL', sqlHoras: 176,
+        includePostgre:  false,
+        includeKeyVault: true,
+      },
+      // DEV
+      {
+        storageGB:        0,
+        storageRegion:   'EAST_US',
+        apComputeRegion: 'EAST_US',   // AP DEV está em East US no PDF
+        jobComputeRegion:'EAST_US',   // Job DEV não é usado neste caso (nodes=0)
+        tier:            'premium',
+        apProdInstance:  'D4AV4', apProdNodes: 1, apProdHorasVM: 325, apProdHorasDbu: 352,
+        jobProdInstance: 'D8AV4', jobProdNodes: 0, jobProdHorasVM: 0,  jobProdHorasDbu: 0,
+        sqlClusterSize:  'XSMALL', sqlHoras: 0,
+        includePostgre:  false,
+        includeKeyVault: true,
+      },
+    ],
+    gabaritoOficial: 2653.80,
+    gabaritoMVP:     2544.72, // sem ADF ($109.08) — nenhum outro gap estrutural conhecido
+    nota: 'ADF ($109) fora do MVP. Região mista (AP East US / Job West US) agora é reproduzida corretamente.',
   },
-  gabaritoOficial: 6223.25      // Valor exato da planilha, sem cortes.
-}
+
+  // ─── AMAGGI ──────────────────────────────────────────────────────────────────
+  // Gabarito oficial PDF: $6.223,25
+  // Linhas do PDF:
+  //   AP  PROD: 2× D8AV4,  West US, 352h VM / 352h DBU         → $896.19
+  //   AP  DEV:  1× D3V2,   West US, 352h VM / 352h DBU         → $243.41
+  //   Job PROD: 1× D8AV4,  West US, 352h VM / 730h DBU         → $486.20
+  //   Job DEV:  1× D16AV4, West US, 352h VM / 730h DBU         → $972.39  ← mapeado como Job DEV
+  //   SQL PROD: D16AV4, 730h All-Purpose (não SQL Serverless)   → $1.858,58 ← FORA DO MVP
+  //   Storage:  72 TB East US                                   → $1.553,74
+  //   PostgreSQL:                                               → $212.74
+  // Linha SQL do AMAGGI é All-Purpose extra, não SQL Serverless real.
+  // gabaritoMVP = 6223.25 - 1858.58 = $4.364,67 (4 linhas de compute que o MVP cobre)
+  {
+    nome: 'AMAGGI',
+    ambientes: [
+      // PROD
+      {
+        storageGB:        72000,
+        storageRegion:   'EAST_US',
+        apComputeRegion: 'WEST_US',
+        jobComputeRegion:'WEST_US',
+        tier:            'premium',
+        apProdInstance:  'D8AV4',  apProdNodes: 2, apProdHorasVM: 352, apProdHorasDbu: 352,
+        jobProdInstance: 'D8AV4',  jobProdNodes: 1, jobProdHorasVM: 352, jobProdHorasDbu: 730,
+        sqlClusterSize:  'XSMALL', sqlHoras: 0,     // SQL Serverless zerado (AMAGGI não usa)
+        includePostgre:  true,
+        includeKeyVault: false,
+      },
+      // DEV
+      {
+        storageGB:        0,
+        storageRegion:   'EAST_US',
+        apComputeRegion: 'WEST_US',
+        jobComputeRegion:'WEST_US',
+        tier:            'premium',
+        apProdInstance:  'D3V2',   apProdNodes: 1, apProdHorasVM: 352, apProdHorasDbu: 352,
+        jobProdInstance: 'D16AV4', jobProdNodes: 1, jobProdHorasVM: 352, jobProdHorasDbu: 730,
+        sqlClusterSize:  'XSMALL', sqlHoras: 0,
+        includePostgre:  false,
+        includeKeyVault: false,
+      },
+    ],
+    gabaritoOficial: 6223.25,
+    gabaritoMVP:     4364.67, // sem linha SQL extra (D16AV4 All-Purpose 730h = $1858.58)
+    toleranciaOverride: 5,
+    nota: 'Linha 6 do PDF (D16AV4 All-Purpose 730h, $1858.58) excede as 4 linhas que o MVP cobre.',
+  },
+
 ];
+
+// ─── Runner ────────────────────────────────────────────────────────────────────
 
 console.log('=== Validação do motor de estimativa (Azure Cost Estimator) ===\n');
 
 let algumFalhou = false;
 
 for (const caso of CASOS) {
-  const resultado = calculateEstimate(caso.input);
-  
-  // AQUI: resultado.totalMonthly mudou para resultado.total
-  const diferenca = resultado.total - caso.gabaritoOficial;
-  const diferencaPct = (diferenca / caso.gabaritoOficial) * 100;
-  const passou = Math.abs(diferencaPct) <= TOLERANCIA_PCT;
+  const tolerancia    = caso.toleranciaOverride ?? TOLERANCIA_PCT;
+  const gabarito      = caso.gabaritoMVP ?? caso.gabaritoOficial;
+  const calculado     = calcTotal(caso.ambientes);
+  const diferenca     = calculado - gabarito;
+  const difPct        = (diferenca / gabarito) * 100;
+  const passou        = Math.abs(difPct) <= tolerancia;
 
   if (!passou) algumFalhou = true;
 
+  const gabaritoLabel = caso.gabaritoMVP
+    ? `$${gabarito.toFixed(2)} (MVP, excluindo itens fora do escopo)`
+    : `$${gabarito.toFixed(2)}`;
+
   console.log(`Caso: ${caso.nome}`);
-  console.log(`  Calculado:  $${resultado.total.toFixed(2)}`);
-  console.log(`  Oficial:    $${caso.gabaritoOficial.toFixed(2)}`);
-  console.log(`  Diferença:  $${diferenca.toFixed(2)}  (${diferencaPct.toFixed(1)}%)`);
-  console.log(`  Status:     ${passou ? '✅ PASSOU' : '❌ FALHOU'}  (tolerância: ±${TOLERANCIA_PCT}%)\n`);
+  console.log(`  Calculado:  $${calculado.toFixed(2)}`);
+  console.log(`  Gabarito:   ${gabaritoLabel}`);
+  console.log(`  Diferença:  $${diferenca.toFixed(2)}  (${difPct.toFixed(1)}%)`);
+  console.log(`  Status:     ${passou ? '✅ PASSOU' : '❌ FALHOU'}  (tolerância: ±${tolerancia}%)`);
+  if (caso.nota) console.log(`  Nota:       ${caso.nota}`);
+  if (caso.gabaritoMVP) console.log(`  Oficial completo: $${caso.gabaritoOficial.toFixed(2)}`);
+  console.log('');
 }
 
 console.log('================================================================');

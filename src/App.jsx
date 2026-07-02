@@ -3,10 +3,18 @@ import { calculateEstimate } from './engine/calculator';
 
 // ─── Constantes ────────────────────────────────────────────────────────────────
 
-const REGIONS = [
+const STORAGE_REGIONS = [
   { value: 'EAST_US',      label: 'East US' },
   { value: 'WEST_US',      label: 'West US' },
   { value: 'BRAZIL_SOUTH', label: 'Brazil South' },
+];
+
+// Região de compute agora é escolhida POR WORKLOAD (All-Purpose e Job Compute
+// cada um com a sua), não mais um único seletor global — casos reais mostram
+// os dois workloads rodando em regiões diferentes no mesmo projeto.
+const COMPUTE_REGIONS = [
+  { value: 'EAST_US', label: 'East US' },
+  { value: 'WEST_US', label: 'West US' },
 ];
 
 const TIERS = [
@@ -15,6 +23,7 @@ const TIERS = [
 ];
 
 const INSTANCES = ['D3V2', 'DS3V2', 'D4AV4', 'D8AV4', 'D16AV4'];
+const SQL_CLUSTER_SIZES = ['XSMALL', 'SMALL', 'MEDIUM', 'LARGE'];
 
 const PRESETS = {
   interativo: { label: 'Interativo (All-Purpose)', horasVM: 352, horasDbu: 352 },
@@ -30,10 +39,11 @@ const ENV_DEFAULTS = {
   dev:  { ratio: 0.5,  color: '#58a6ff', label: 'DEV'  },
 };
 
-// ─── Estado default de um ambiente de workload ────────────────────────────────
+// ─── Estado default ────────────────────────────────────────────────────────────
+
 const defaultEnv = (instance, nodes, preset, override = false) => ({
   enabled:  true,
-  override, // se true, usa valores próprios; se false, deriva de prod
+  override,
   instance,
   nodes,
   preset,
@@ -41,35 +51,45 @@ const defaultEnv = (instance, nodes, preset, override = false) => ({
   horasDbu: PRESETS[preset].horasDbu,
 });
 
-const defaultWorkload = (instance = 'D8AV4', preset = 'comercial') => ({
+const defaultWorkload = (instance = 'D8AV4', preset = 'comercial', region = 'WEST_US') => ({
   enabled: false,
+  region, // região de compute deste workload (própria — ver COMPUTE_REGIONS)
   prod: defaultEnv(instance, 1, preset, true),
   hom:  defaultEnv(instance, 1, preset, false),
   dev:  defaultEnv(instance, 1, preset, false),
 });
 
+const defaultSqlEnv = (horas = 0) => ({
+  enabled:     false,
+  clusterSize: 'XSMALL',
+  horas,
+});
+
 const INITIAL = {
+  projectName:    '',
   storageRegion:  'EAST_US',
-  computeRegion:  'WEST_US',
   tier:           'premium',
   storageGB:      0,
   storageEnabled: true,
-  allPurpose:  defaultWorkload('D3V2',  'interativo'),
-  jobCompute:  defaultWorkload('D8AV4', 'comercial'),
-  sqlCompute:  defaultWorkload('D16AV4','mensal'),
-  postgre:     false,
-  keyVault:    false,
+  allPurpose: defaultWorkload('D3V2',  'interativo', 'WEST_US'),
+  jobCompute: defaultWorkload('D8AV4', 'comercial',  'WEST_US'),
+  sqlCompute: {
+    enabled: false,
+    prod: { ...defaultSqlEnv(176), enabled: true },
+    hom:  defaultSqlEnv(44),
+    dev:  defaultSqlEnv(88),
+  },
+  postgre:  false,
+  keyVault: false,
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// Resolve os parâmetros de um ambiente (override ou derivado de prod)
 const resolveEnv = (envKey, workload) => {
   const env = workload[envKey];
   if (!env.enabled) return null;
   if (env.override || envKey === 'prod') return env;
-  // Deriva de prod com ratio
-  const prod = workload.prod;
+  const prod  = workload.prod;
   const ratio = ENV_DEFAULTS[envKey].ratio;
   return {
     ...env,
@@ -84,58 +104,52 @@ const fmt = (v) =>
   v == null || isNaN(v) ? '—' :
   v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-// ─── Cálculo ──────────────────────────────────────────────────────────────────
+const regionLabel = (v) =>
+  [...STORAGE_REGIONS, ...COMPUTE_REGIONS].find(r => r.value === v)?.label ?? v;
 
-const calcWorkloadEnv = (envParams, workloadType, tier, computeRegion, prices) => {
-  if (!envParams) return 0;
-  const { instance, nodes, horasVM, horasDbu } = envParams;
-  const inst = prices.databricks.instances[instance];
-  if (!inst) return 0;
-  const dbuPrice = prices.databricks.tiers[tier]?.[workloadType] ?? 0;
-  const vmPrice  = inst.vm_price_per_hour?.[computeRegion] ?? 0;
-  return (nodes * inst.dbu_per_hour * dbuPrice * horasDbu)
-       + (nodes * vmPrice * horasVM);
-};
+// ─── Cálculo ──────────────────────────────────────────────────────────────────
 
 const runCalc = (cfg) => {
   const envKeys = ['prod', 'hom', 'dev'];
   const results = {};
 
   for (const env of envKeys) {
-    const ap  = resolveEnv(env, cfg.allPurpose);
-    const job = resolveEnv(env, cfg.jobCompute);
-    const sql = resolveEnv(env, cfg.sqlCompute);
+    const ap     = resolveEnv(env, cfg.allPurpose);
+    const job    = resolveEnv(env, cfg.jobCompute);
+    const sqlEnv = cfg.sqlCompute[env];
+
+    const envTemWorkload =
+      (cfg.allPurpose.enabled && ap     != null) ||
+      (cfg.jobCompute.enabled && job    != null) ||
+      (cfg.sqlCompute.enabled && sqlEnv?.enabled);
 
     const input = {
-      storageRegion:  cfg.storageRegion,
-      computeRegion:  cfg.computeRegion,
-      tier:           cfg.tier,
+      storageRegion: cfg.storageRegion,
+      // Cada workload usa a sua própria região de compute (não existe mais
+      // um "computeRegion" global) — resolve o caso de região mista (ex: PRIO,
+      // onde AP roda em East US e Job roda em West US no mesmo projeto).
+      apComputeRegion:  cfg.allPurpose.region,
+      jobComputeRegion: cfg.jobCompute.region,
+      tier:          cfg.tier,
       storageGB: env === 'prod' && cfg.storageEnabled ? cfg.storageGB : 0,
 
-      // Dev zerado — cada ambiente calcula só sua própria linha
-      apDevInstance:   'D8AV4', apDevNodes: 0,
-      apDevHorasVM:    0,       apDevHorasDbu: 0,
-
-      apProdInstance:  ap?.instance  ?? 'D8AV4',
-      apProdNodes:     (cfg.allPurpose.enabled && ap) ? ap.nodes : 0,
-      apProdHorasVM:   ap?.horasVM   ?? 0,
-      apProdHorasDbu:  ap?.horasDbu  ?? 0,
-
-      jobDevInstance:  'D8AV4', jobDevNodes: 0,
-      jobDevHorasVM:   0,       jobDevHorasDbu: 0,
+      apProdInstance: ap?.instance  ?? 'D8AV4',
+      apProdNodes:    (cfg.allPurpose.enabled && ap) ? ap.nodes : 0,
+      apProdHorasVM:  ap?.horasVM   ?? 0,
+      apProdHorasDbu: ap?.horasDbu  ?? 0,
 
       jobProdInstance: job?.instance ?? 'D8AV4',
       jobProdNodes:    (cfg.jobCompute.enabled && job) ? job.nodes : 0,
       jobProdHorasVM:  job?.horasVM  ?? 0,
       jobProdHorasDbu: job?.horasDbu ?? 0,
 
-      sqlInstance:  sql?.instance ?? 'D16AV4',
-      sqlNodes:     (cfg.sqlCompute.enabled && sql) ? sql.nodes : 0,
-      sqlHorasVM:   sql?.horasVM  ?? 0,
-      sqlHorasDbu:  sql?.horasDbu ?? 0,
+      sqlClusterSize: (cfg.sqlCompute.enabled && sqlEnv?.enabled)
+        ? sqlEnv.clusterSize : 'XSMALL',
+      sqlHoras: (cfg.sqlCompute.enabled && sqlEnv?.enabled)
+        ? sqlEnv.horas : 0,
 
       includePostgre:  env === 'prod' && cfg.postgre,
-      includeKeyVault: cfg.keyVault,
+      includeKeyVault: cfg.keyVault && envTemWorkload,
     };
 
     results[env] = calculateEstimate(input);
@@ -145,6 +159,7 @@ const runCalc = (cfg) => {
 };
 
 // ─── Estilos ──────────────────────────────────────────────────────────────────
+
 const C = {
   bg:      '#0d1117',
   surface: '#161b22',
@@ -174,7 +189,7 @@ const S = {
   label: { fontSize: 10, fontWeight: 600, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.5px' },
   input: { background: C.bg, border: `1px solid ${C.border}`, borderRadius: 6, color: C.text, padding: '7px 9px', fontSize: 12, outline: 'none', width: '100%', boxSizing: 'border-box' },
   select: { background: C.bg, border: `1px solid ${C.border}`, borderRadius: 6, color: C.text, padding: '7px 9px', fontSize: 12, outline: 'none', width: '100%', cursor: 'pointer' },
-  presetBar: { display: 'flex', gap: 5, marginTop: 6 },
+  presetBar: { display: 'flex', gap: 5, marginTop: 6, flexWrap: 'wrap' },
   presetBtn: (active) => ({ padding: '4px 10px', borderRadius: 20, border: active ? `1px solid ${C.blue}` : `1px solid ${C.border}`, background: active ? 'rgba(31,111,235,0.15)' : 'transparent', color: active ? C.blue : C.muted, fontSize: 10, fontWeight: 600, cursor: 'pointer' }),
   toggleWrap: (on) => ({ display: 'inline-flex', alignItems: 'center', gap: 7, cursor: 'pointer', fontSize: 12, color: on ? C.blue : C.muted, fontWeight: on ? 600 : 400, userSelect: 'none' }),
   toggleTrack: (on) => ({ width: 32, height: 18, borderRadius: 9, background: on ? C.accent : C.border, position: 'relative', transition: 'background .2s', flexShrink: 0 }),
@@ -184,6 +199,7 @@ const S = {
   envToggleRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, padding: '6px 0', borderBottom: `1px solid ${C.border}` },
   overrideBtn: (on) => ({ padding: '3px 8px', borderRadius: 4, border: `1px solid ${on ? C.yellow : C.border}`, background: on ? `${C.yellow}18` : 'transparent', color: on ? C.yellow : C.muted, fontSize: 9, fontWeight: 700, cursor: 'pointer', letterSpacing: '0.5px' }),
   stickyPanel: { position: 'sticky', top: 20 },
+  warningBanner: { background: 'rgba(210,153,34,0.12)', border: `1px solid ${C.yellow}`, borderRadius: 8, padding: '10px 12px', marginBottom: 14, fontSize: 11, lineHeight: 1.6, color: '#e3b341' },
   totalCard: { background: 'linear-gradient(135deg,#0f2744,#0d1b2e)', border: `1px solid ${C.accent}`, borderRadius: 10, padding: 20, marginBottom: 14 },
   totalLabel: { fontSize: 10, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: 6 },
   totalValue: { fontSize: 34, fontWeight: 800, color: C.blue, letterSpacing: '-1px', lineHeight: 1 },
@@ -201,6 +217,55 @@ const S = {
   dot: { position: 'absolute', left: 0, color: C.accent, fontWeight: 700 },
   disabled: { opacity: 0.3, pointerEvents: 'none' },
   hint: { fontSize: 10, color: C.muted, marginTop: 6, fontStyle: 'italic' },
+  projectBadge: {
+    background: '#0d1117',
+    border: `1px solid ${C.accent}`,
+    borderRadius: 6,
+    padding: '8px 12px',
+    marginBottom: 12,
+    fontSize: 12,
+    color: C.blue,
+    fontWeight: 600,
+  },
+  openCalcBtn: {
+    display: 'block',
+    marginTop: 14,
+    padding: '9px 0',
+    background: 'linear-gradient(135deg, #1a237e, #0078d4)',
+    borderRadius: 6,
+    textAlign: 'center',
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 700,
+    textDecoration: 'none',
+    letterSpacing: '0.3px',
+  },
+  copyBox: {
+    background: '#0d1117',
+    border: `1px solid ${C.border}`,
+    borderRadius: 6,
+    padding: '10px 12px',
+    marginTop: 10,
+    fontSize: 11,
+    color: C.muted,
+    lineHeight: 1.8,
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+  },
+  copyBtn: {
+    display: 'block',
+    width: '100%',
+    marginTop: 6,
+    padding: '6px 0',
+    background: 'transparent',
+    border: `1px solid ${C.border}`,
+    borderRadius: 6,
+    color: C.muted,
+    fontSize: 10,
+    fontWeight: 600,
+    cursor: 'pointer',
+    letterSpacing: '0.3px',
+  },
 };
 
 // ─── Sub-componentes ──────────────────────────────────────────────────────────
@@ -248,7 +313,6 @@ function EnvPanel({ envKey, workload, prodValues, onChange }) {
           </button>
         )}
       </div>
-
       <div style={env.enabled ? {} : S.disabled}>
         {isOverride ? (
           <>
@@ -272,10 +336,16 @@ function EnvPanel({ envKey, workload, prodValues, onChange }) {
             </div>
             {env.preset === 'custom' && (
               <div style={{ ...S.row, marginTop: 8 }}>
-                <Field label="Horas VM"><input style={S.input} type="number" min={1} max={744}
-                  value={env.horasVM ?? ''} onChange={e => update({ horasVM: Number(e.target.value) })} /></Field>
-                <Field label="Horas DBU"><input style={S.input} type="number" min={1} max={744}
-                  value={env.horasDbu ?? ''} onChange={e => update({ horasDbu: Number(e.target.value) })} /></Field>
+                <Field label="Horas VM">
+                  <input style={S.input} type="number" min={1} max={744}
+                    value={env.horasVM ?? ''}
+                    onChange={e => update({ horasVM: Number(e.target.value) })} />
+                </Field>
+                <Field label="Horas DBU">
+                  <input style={S.input} type="number" min={1} max={744}
+                    value={env.horasDbu ?? ''}
+                    onChange={e => update({ horasDbu: Number(e.target.value) })} />
+                </Field>
               </div>
             )}
           </>
@@ -291,9 +361,8 @@ function EnvPanel({ envKey, workload, prodValues, onChange }) {
   );
 }
 
-function WorkloadSection({ title, color, workloadKey, workload, onChange }) {
+function WorkloadSection({ title, color, workload, onChange }) {
   const [activeEnv, setActiveEnv] = useState('prod');
-  const prod = workload.prod;
 
   return (
     <div style={S.card}>
@@ -303,6 +372,14 @@ function WorkloadSection({ title, color, workloadKey, workload, onChange }) {
           label={workload.enabled ? 'Ativo' : 'Inativo'} />
       </div>
       <div style={{ ...S.cardBody, ...(workload.enabled ? {} : S.disabled) }}>
+        <div style={{ ...S.row, marginBottom: 14 }}>
+          <Field label={`Região de Compute — ${title}`}>
+            <select style={S.select} value={workload.region}
+              onChange={e => onChange({ ...workload, region: e.target.value })}>
+              {COMPUTE_REGIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+            </select>
+          </Field>
+        </div>
         <div style={S.envTabs}>
           {Object.entries(ENV_DEFAULTS).map(([k, d]) => (
             <button key={k} style={S.envTab(activeEnv === k, d.color)} onClick={() => setActiveEnv(k)}>
@@ -313,10 +390,142 @@ function WorkloadSection({ title, color, workloadKey, workload, onChange }) {
         <EnvPanel
           envKey={activeEnv}
           workload={workload}
-          prodValues={prod}
+          prodValues={workload.prod}
           onChange={(updated) => onChange({ ...workload, [activeEnv]: updated })}
         />
       </div>
+    </div>
+  );
+}
+
+function SqlSection({ sql, onChange }) {
+  const [activeEnv, setActiveEnv] = useState('prod');
+  const envs = ['prod', 'hom', 'dev'];
+
+  const updateEnv = (envKey, patch) =>
+    onChange({ ...sql, [envKey]: { ...sql[envKey], ...patch } });
+
+  return (
+    <div style={S.card}>
+      <div style={S.cardHead}>
+        <span style={S.cardTitle(C.red)}>SQL Serverless</span>
+        <Toggle on={sql.enabled} onChange={v => onChange({ ...sql, enabled: v })}
+          label={sql.enabled ? 'Ativo' : 'Inativo'} />
+      </div>
+      <div style={{ ...S.cardBody, ...(sql.enabled ? {} : S.disabled) }}>
+        <div style={S.envTabs}>
+          {envs.map(k => (
+            <button key={k} style={S.envTab(activeEnv === k, ENV_DEFAULTS[k].color)}
+              onClick={() => setActiveEnv(k)}>
+              {ENV_DEFAULTS[k].label} {!sql[k].enabled && '✕'}
+            </button>
+          ))}
+        </div>
+        <div style={S.envToggleRow}>
+          <Toggle on={sql[activeEnv].enabled}
+            onChange={v => updateEnv(activeEnv, { enabled: v })}
+            label={`Ambiente ${ENV_DEFAULTS[activeEnv].label} ativo`} />
+        </div>
+        <div style={sql[activeEnv].enabled ? {} : S.disabled}>
+          <div style={S.row}>
+            <Field label="Tamanho do Cluster">
+              <select style={S.select} value={sql[activeEnv].clusterSize}
+                onChange={e => updateEnv(activeEnv, { clusterSize: e.target.value })}>
+                {SQL_CLUSTER_SIZES.map(s => <option key={s}>{s}</option>)}
+              </select>
+            </Field>
+            <Field label="Horas de execução">
+              <input style={S.input} type="number" min={0} max={744}
+                value={sql[activeEnv].horas}
+                onChange={e => updateEnv(activeEnv, { horas: Number(e.target.value) })} />
+            </Field>
+          </div>
+          <p style={S.hint}>Sem componente de VM — cobra exclusivamente por DBU × horas.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Guia de preenchimento com resumo copiável ────────────────────────────────
+
+function GuiaPreenchimento({ cfg, breakdown, totals, currency }) {
+  const [copied, setCopied] = useState(false);
+
+  const activeWorkloads = [
+    cfg.allPurpose.enabled && 'All-Purpose Compute',
+    cfg.jobCompute.enabled && 'Job Compute',
+    cfg.sqlCompute.enabled && 'SQL Serverless',
+    cfg.postgre            && 'PostgreSQL Flexible',
+    cfg.keyVault           && 'Key Vault',
+  ].filter(Boolean);
+
+  const resumo = [
+    cfg.projectName ? `📁 Projeto: ${cfg.projectName}` : '📁 Projeto: (sem nome)',
+    `🌍 Storage: ${regionLabel(cfg.storageRegion)} | All-Purpose: ${regionLabel(cfg.allPurpose.region)} | Job Compute: ${regionLabel(cfg.jobCompute.region)} | Tier: ${cfg.tier === 'premium' ? 'Premium' : 'Standard'}`,
+    '',
+    '── Serviços ativos ──',
+    ...activeWorkloads.map(w => `  • ${w}`),
+    '',
+    '── Custo por ambiente ──',
+    `  PROD: ${currency} ${fmt(totals.prod)}`,
+    `  HOM:  ${currency} ${fmt(totals.hom)}`,
+    `  DEV:  ${currency} ${fmt(totals.dev)}`,
+    `  TOTAL: ${currency} ${fmt(totals.prod + totals.hom + totals.dev)}`,
+    '',
+    '── Breakdown por serviço ──',
+    ...breakdown.map(b => `  ${b.label}: ${currency} ${fmt(b.prod + b.hom + b.dev)}`),
+    '',
+    'Gerado por Azure Cost Estimator — Dataside',
+  ].join('\n');
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(resumo).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  return (
+    <div style={S.guideCard}>
+      <div style={S.guideTitle}>📋 Guia de Preenchimento — Calculadora Azure</div>
+
+      {cfg.projectName && (
+        <div style={S.projectBadge}>🗂 {cfg.projectName}</div>
+      )}
+
+      {[
+        <>Acesse <strong>azure.microsoft.com/pricing/calculator</strong></>,
+        <>Adicione <strong>Storage Accounts</strong> → ADLS Gen2, LRS, Hot, região <strong>{regionLabel(cfg.storageRegion)}</strong></>,
+        cfg.allPurpose.enabled && <>Adicione <strong>Azure Databricks — All-Purpose</strong> → Tier <strong>{cfg.tier === 'premium' ? 'Premium' : 'Standard'}</strong>, região <strong>{regionLabel(cfg.allPurpose.region)}</strong></>,
+        cfg.jobCompute.enabled && <>Adicione <strong>Azure Databricks — Job Compute</strong> → Tier <strong>{cfg.tier === 'premium' ? 'Premium' : 'Standard'}</strong>, região <strong>{regionLabel(cfg.jobCompute.region)}</strong></>,
+        <>Para cada workload ativo, configure Workload Type, instância, nós e horas conforme o breakdown — repita para cada ambiente ativo.</>,
+        <>Clique em <strong>Save and share</strong> para gerar o link oficial.</>,
+      ].filter(Boolean).map((step, i) => (
+        <div key={i} style={S.guideStep}>
+          <span style={S.dot}>{i + 1}.</span>{step}
+        </div>
+      ))}
+
+      {/* Resumo copiável */}
+      <div style={{ marginTop: 14 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 6 }}>
+          Resumo para compartilhar
+        </div>
+        <div style={S.copyBox}>{resumo}</div>
+        <button style={S.copyBtn} onClick={handleCopy}>
+          {copied ? '✅ Copiado!' : '📋 Copiar resumo'}
+        </button>
+      </div>
+
+      <a
+        href="https://azure.microsoft.com/pt-br/pricing/calculator/"
+        target="_blank"
+        rel="noopener noreferrer"
+        style={S.openCalcBtn}
+      >
+        🔗 Abrir Calculadora Azure →
+      </a>
     </div>
   );
 }
@@ -330,28 +539,35 @@ export default function App() {
     try { return runCalc(cfg); } catch (e) { console.error(e); return null; }
   }, [cfg]);
 
-  const sumEnv = (env) => {
-    if (!results?.[env]) return 0;
-    const l = results[env].lines;
-    return (l.storage ?? 0) + (l.apProd ?? 0)
-         + (l.jobProd ?? 0) + (l.sql ?? 0)
-         + (l.postgre ?? 0) + (l.keyVault ?? 0);
-  };
+  // Soma por ambiente respeitando a moeda — nunca mistura USD com BRL num único número.
+  const sumEnvByCurrency = (env) => results?.[env]?.totalsByCurrency ?? { USD: 0, BRL: 0 };
 
-  const totals = { prod: sumEnv('prod'), hom: sumEnv('hom'), dev: sumEnv('dev') };
-  const grand  = totals.prod + totals.hom + totals.dev;
-  const currency = results?.prod?.currency ?? 'USD';
+  const totalsUSD = {
+    prod: sumEnvByCurrency('prod').USD, hom: sumEnvByCurrency('hom').USD, dev: sumEnvByCurrency('dev').USD,
+  };
+  const totalsBRL = {
+    prod: sumEnvByCurrency('prod').BRL, hom: sumEnvByCurrency('hom').BRL, dev: sumEnvByCurrency('dev').BRL,
+  };
+  const grandUSD = totalsUSD.prod + totalsUSD.hom + totalsUSD.dev;
+  const grandBRL = totalsBRL.prod + totalsBRL.hom + totalsBRL.dev;
+
+  const mixedCurrency = ['prod', 'hom', 'dev'].some(e => results?.[e]?.mixedCurrency);
+  const allWarnings = ['prod', 'hom', 'dev'].flatMap(e => results?.[e]?.warnings ?? []);
+
+  // Compatibilidade com o restante da UI (breakdown, guia): quando NÃO há mistura,
+  // continua existindo um único total/moeda, como antes.
+  const totals   = mixedCurrency ? totalsUSD : (grandBRL > 0 ? totalsBRL : totalsUSD);
+  const grand    = mixedCurrency ? grandUSD  : (grandBRL > 0 ? grandBRL  : grandUSD);
+  const currency = mixedCurrency ? 'USD' : (grandBRL > 0 ? 'BRL' : 'USD');
 
   const breakdown = results ? [
-    { label: 'Storage (ADLS Gen2)',  prod: results.prod.lines.storage ?? 0,  hom: 0, dev: 0 },
-    { label: 'All-Purpose Compute',  prod: results.prod.lines.apProd  ?? 0,  hom: results.hom.lines.apProd  ?? 0, dev: results.dev.lines.apProd  ?? 0 },
-    { label: 'Job Compute',          prod: results.prod.lines.jobProd ?? 0,  hom: results.hom.lines.jobProd ?? 0, dev: results.dev.lines.jobProd ?? 0 },
-    { label: 'SQL Serverless',       prod: results.prod.lines.sql     ?? 0,  hom: results.hom.lines.sql     ?? 0, dev: results.dev.lines.sql     ?? 0 },
-    { label: 'PostgreSQL',           prod: results.prod.lines.postgre ?? 0,  hom: 0, dev: 0 },
-    { label: 'Key Vault',            prod: results.prod.lines.keyVault ?? 0, hom: results.hom.lines.keyVault ?? 0, dev: results.dev.lines.keyVault ?? 0 },
+    { label: 'Storage (ADLS Gen2)', prod: results.prod.lines.storage  ?? 0, hom: 0,                               dev: 0 },
+    { label: 'All-Purpose Compute', prod: results.prod.lines.apProd   ?? 0, hom: results.hom.lines.apProd   ?? 0, dev: results.dev.lines.apProd  ?? 0 },
+    { label: 'Job Compute',         prod: results.prod.lines.jobProd  ?? 0, hom: results.hom.lines.jobProd  ?? 0, dev: results.dev.lines.jobProd ?? 0 },
+    { label: 'SQL Serverless',      prod: results.prod.lines.sql      ?? 0, hom: results.hom.lines.sql      ?? 0, dev: results.dev.lines.sql     ?? 0 },
+    { label: 'PostgreSQL',          prod: results.prod.lines.postgre  ?? 0, hom: 0,                               dev: 0 },
+    { label: 'Key Vault',           prod: results.prod.lines.keyVault ?? 0, hom: results.hom.lines.keyVault ?? 0, dev: results.dev.lines.keyVault ?? 0 },
   ].filter(b => b.prod + b.hom + b.dev > 0.001) : [];
-
-  const regionLabel = (v) => REGIONS.find(r => r.value === v)?.label ?? v;
 
   return (
     <div style={S.app}>
@@ -360,27 +576,29 @@ export default function App() {
           <h1 style={S.headerTitle}>Azure Cost Estimator</h1>
           <p style={S.headerSub}>Dataside · Azure + Databricks · Preço de lista on-demand</p>
         </div>
-        <span style={S.badge}>MVP v0.2</span>
+        <span style={S.badge}>MVP v0.5</span>
       </div>
 
       <div style={S.body}>
-        {/* Formulário */}
         <div>
           {/* Config global */}
           <div style={S.card}>
             <div style={S.cardHead}><span style={S.cardTitle()}>Configuração do Projeto</span></div>
             <div style={S.cardBody}>
+              <Field label="Nome do Projeto">
+                <input
+                  style={{ ...S.input, marginBottom: 12 }}
+                  type="text"
+                  placeholder="Ex: Pipeline Analytics — Cliente XYZ"
+                  value={cfg.projectName}
+                  onChange={e => setCfg({ ...cfg, projectName: e.target.value })}
+                />
+              </Field>
               <div style={S.row}>
                 <Field label="Região — Storage">
                   <select style={S.select} value={cfg.storageRegion}
                     onChange={e => setCfg({ ...cfg, storageRegion: e.target.value })}>
-                    {REGIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-                  </select>
-                </Field>
-                <Field label="Região — Databricks / VMs">
-                  <select style={S.select} value={cfg.computeRegion}
-                    onChange={e => setCfg({ ...cfg, computeRegion: e.target.value })}>
-                    {REGIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                    {STORAGE_REGIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                   </select>
                 </Field>
                 <Field label="Tier Databricks">
@@ -390,6 +608,11 @@ export default function App() {
                   </select>
                 </Field>
               </div>
+              <p style={S.hint}>
+                A região de compute (Databricks/VMs) agora é definida em cada workload
+                (All-Purpose e Job Compute) — casos reais frequentemente usam regiões
+                diferentes para cada um dentro do mesmo projeto.
+              </p>
             </div>
           </div>
 
@@ -410,33 +633,51 @@ export default function App() {
             </div>
           </div>
 
-          {/* Workloads */}
-          {[
-            { key: 'allPurpose', title: 'All-Purpose Compute', color: C.green },
-            { key: 'jobCompute', title: 'Job Compute',         color: C.yellow },
-            { key: 'sqlCompute', title: 'SQL Serverless',      color: C.red },
-          ].map(({ key, title, color }) => (
-            <WorkloadSection key={key} title={title} color={color} workloadKey={key}
-              workload={cfg[key]}
-              onChange={v => setCfg({ ...cfg, [key]: v })} />
-          ))}
+          <WorkloadSection title="All-Purpose Compute" color={C.green}
+            workload={cfg.allPurpose}
+            onChange={v => setCfg({ ...cfg, allPurpose: v })} />
 
-          {/* Periféricos */}
+          <WorkloadSection title="Job Compute" color={C.yellow}
+            workload={cfg.jobCompute}
+            onChange={v => setCfg({ ...cfg, jobCompute: v })} />
+
+          <SqlSection sql={cfg.sqlCompute}
+            onChange={v => setCfg({ ...cfg, sqlCompute: v })} />
+
           <div style={S.card}>
             <div style={S.cardHead}><span style={S.cardTitle()}>Serviços Adicionais</span></div>
             <div style={S.cardBody}>
               <div style={{ display: 'flex', gap: 24 }}>
-                <Toggle on={cfg.postgre} onChange={v => setCfg({ ...cfg, postgre: v })} label="PostgreSQL Flexible (D2dsv5)" />
+                <Toggle on={cfg.postgre}  onChange={v => setCfg({ ...cfg, postgre: v })}  label="PostgreSQL Flexible (D2dsv5)" />
                 <Toggle on={cfg.keyVault} onChange={v => setCfg({ ...cfg, keyVault: v })} label="Key Vault" />
               </div>
             </div>
           </div>
         </div>
 
-        {/* Painel de resultado */}
+        {/* Painel direito */}
         <div style={S.stickyPanel}>
+          {mixedCurrency && (
+            <div style={S.warningBanner}>
+              ⚠️ Storage em Brazil South (BRL) + compute em região USD no mesmo projeto.
+              Os totais abaixo são mostrados <strong>separados por moeda</strong> — nunca somados,
+              para evitar um número final incorreto. O MVP ainda não tem tabela de preço de
+              compute Databricks/VM para Brazil South.
+            </div>
+          )}
+          {!mixedCurrency && allWarnings.length > 0 && (
+            <div style={S.warningBanner}>
+              ⚠️ {allWarnings.length === 1 ? 'Aviso de preço:' : `${allWarnings.length} avisos de preço:`}{' '}
+              {[...new Set(allWarnings)].join(' · ')}
+            </div>
+          )}
           <div style={S.totalCard}>
-            <div style={S.totalLabel}>Custo total estimado (todos os ambientes ativos)</div>
+            <div style={S.totalLabel}>
+              {cfg.projectName
+                ? `Estimativa — ${cfg.projectName}`
+                : 'Custo total estimado (todos os ambientes ativos)'}
+              {mixedCurrency && ' — Compute (USD)'}
+            </div>
             <div>
               <span style={S.totalValue}>{fmt(grand)}</span>
               <span style={S.totalCurrency}>{currency}/mês</span>
@@ -450,6 +691,24 @@ export default function App() {
               ))}
             </div>
           </div>
+
+          {mixedCurrency && grandBRL > 0.001 && (
+            <div style={S.totalCard}>
+              <div style={S.totalLabel}>Storage — Brazil South (BRL)</div>
+              <div>
+                <span style={S.totalValue}>{fmt(grandBRL)}</span>
+                <span style={S.totalCurrency}>BRL/mês</span>
+              </div>
+              <div style={S.envPills}>
+                {Object.entries(ENV_DEFAULTS).map(([k, d]) => (
+                  <div key={k} style={S.envPill(d.color)}>
+                    <div style={S.envPillLabel(d.color)}>{d.label}</div>
+                    <div style={S.envPillVal}>{fmt(totalsBRL[k])}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {breakdown.length > 0 && (
             <div style={S.card}>
@@ -477,21 +736,12 @@ export default function App() {
             </div>
           )}
 
-          {/* Guia */}
-          <div style={S.guideCard}>
-            <div style={S.guideTitle}>📋 Guia de Preenchimento — Calculadora Azure</div>
-            {[
-              <>Acesse <strong>azure.microsoft.com/pricing/calculator</strong></>,
-              <>Adicione <strong>Storage Accounts</strong> → ADLS Gen2, LRS, Hot, região <strong>{regionLabel(cfg.storageRegion)}</strong></>,
-              <>Adicione <strong>Azure Databricks</strong> → Tier <strong>{cfg.tier === 'premium' ? 'Premium' : 'Standard'}</strong>, região <strong>{regionLabel(cfg.computeRegion)}</strong></>,
-              <>Para cada workload ativo, configure Workload Type, instância, nós e horas conforme o breakdown acima — repita para cada ambiente ativo.</>,
-              <>Clique em <strong>Save and share</strong> para gerar o link oficial.</>,
-            ].map((step, i) => (
-              <div key={i} style={S.guideStep}>
-                <span style={S.dot}>{i + 1}.</span>{step}
-              </div>
-            ))}
-          </div>
+          <GuiaPreenchimento
+            cfg={cfg}
+            breakdown={breakdown}
+            totals={totals}
+            currency={currency}
+          />
         </div>
       </div>
     </div>
