@@ -301,6 +301,46 @@ const S = {
     cursor: 'pointer',
     letterSpacing: '0.3px',
   },
+  HelpDetails: { marginBottom: 12 },
+  HelpSummary: { cursor: 'pointer', fontSize: 11, fontWeight: 600, color: C.blue, userSelect: 'none', listStyle: 'none' },
+  HelpBox: {
+    background: '#0d1117',
+    border: `1px solid ${C.border}`,
+    borderRadius: 6,
+    padding: '10px 12px',
+    marginTop: 8,
+    fontSize: 11,
+    color: C.muted,
+    lineHeight: 1.6,
+    whiteSpace: 'pre-line',
+    wordBreak: 'break-word',
+  },
+  parserBtnRow: { display: 'flex', gap: 8, marginTop: 15, flexWrap: 'wrap' },
+  parserBtnPrimary: {
+    flex: 1,
+    minWidth: 160,
+    padding: '9px 12px',
+    background: 'linear-gradient(135deg, #1a237e, #0078d4)',
+    borderRadius: 6,
+    border: 'none',
+    textAlign: 'center',
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 700,
+    cursor: 'pointer',
+    letterSpacing: '0.3px',
+  },
+  parserBtnSecondary: {
+    padding: '9px 12px',
+    background: 'transparent',
+    border: `1px solid ${C.border}`,
+    borderRadius: 6,
+    color: C.muted,
+    fontSize: 11,
+    fontWeight: 600,
+    cursor: 'pointer',
+    letterSpacing: '0.3px',
+  },
 };
 
 // ─── Sub-componentes ──────────────────────────────────────────────────────────
@@ -567,43 +607,86 @@ function GuiaPreenchimento({ cfg, breakdown, totals, currency }) {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
+const PARSER_EXAMPLE_TEXT = `Cliente terá 80 TB de dados, Databricks Premium, região Brazil South.
+
+All-purpose compute D8a v4 2 nodes 352 hours.
+
+Jobs compute West US 730 hours.
+
+SQL Serverless MEDIUM 176 hours.
+
+PostgreSQL
+
+Key Vault`;
+
+const PARSER_HELP_TEXT = `Substitua apenas os valores entre [ ].
+
+Cliente terá [TB] TB de dados,
+Databricks [Standard/Premium],
+região [Região].
+
+All-purpose compute [SKU] [Nodes] nodes [Horas] hours.
+
+Jobs compute [Região] [Horas] hours.
+
+SQL Serverless [Size] [Horas] hours.
+
+[PostgreSQL] [Key Vault]`;
+
 export default function App() {
   const [cfg, setCfg] = useState(INITIAL);
   const [rawInput, setRawInput] = useState('');
   const [parserMessage, setParserMessage] = useState(null);
+  const [isParsing, setIsParsing] = useState(false);
+
+  const handleInsertExample = () => {
+    setRawInput(PARSER_EXAMPLE_TEXT);
+  };
+
+  const handleClear = () => {
+    setRawInput('');
+    setParserMessage(null);
+  };
 
   const handleAutoFill = () => {
-    try {
-      if (!rawInput?.trim()) {
-        setParserMessage({ type: 'error', text: '❌ Cole um texto antes de processar.' });
-        return;
-      }
+    if (!rawInput?.trim()) {
+      setParserMessage({ type: 'error', text: '❌ Cole um texto antes de processar.' });
+      return;
+    }
 
-      const { config, found, extracted, warnings } = parseProject(rawInput);
-      const hasFound = Object.values(found ?? {}).some(Boolean);
+    setIsParsing(true);
+    setParserMessage({ type: 'processing', text: '🤖 Processando...' });
 
-      setCfg(old => mergeParsedConfig(old, config, found));
+    window.setTimeout(() => {
+      try {
+        const { config, found, warnings, resourceSummary } = parseProject(rawInput);
+        const hasFound = Object.values(found ?? {}).some(Boolean);
 
-      if (!hasFound) {
+        setCfg(old => mergeParsedConfig(old, config, found));
+
+        if (!hasFound) {
+          setParserMessage({
+            type: 'error',
+            text: '⚠️ Nenhum recurso identificado — valores atuais mantidos.',
+            resourceSummary: resourceSummary ?? { found: [], notFound: [] },
+            warnings: warnings ?? [],
+          });
+          return;
+        }
+
         setParserMessage({
-          type: 'error',
-          text: '⚠️ Nenhum recurso identificado — valores atuais mantidos.',
-          summary: [],
+          type: 'success',
+          text: '✅ Configuração preenchida automaticamente.',
+          resourceSummary: resourceSummary ?? { found: [], notFound: [] },
           warnings: warnings ?? [],
         });
-        return;
+      } catch (err) {
+        console.error(err);
+        setParserMessage({ type: 'error', text: '❌ Não foi possível interpretar o texto.' });
+      } finally {
+        setIsParsing(false);
       }
-
-      setParserMessage({
-        type: 'success',
-        text: '✅ Configuração preenchida automaticamente.',
-        summary: extracted ?? [],
-        warnings: warnings ?? [],
-      });
-    } catch (err) {
-      console.error(err);
-      setParserMessage({ type: 'error', text: '❌ Não foi possível interpretar o texto.' });
-    }
+    }, 50);
   };
 
   const results = useMemo(() => {
@@ -647,7 +730,7 @@ export default function App() {
           <h1 style={S.headerTitle}>Azure Cost Estimator</h1>
           <p style={S.headerSub}>Dataside · Azure + Databricks · Preço de lista on-demand</p>
         </div>
-        <span style={S.badge}>MVP v0.6</span>
+        <span style={S.badge}>MVP v0.7</span>
       </div>
 
       <div style={S.body}>
@@ -655,37 +738,81 @@ export default function App() {
           {/* Preenchimento Automático */}
           <div style={S.card}>
             <div style={S.cardHead}>
-              <span style={S.cardTitle()}>Preenchimento Automático (Beta)</span>
+              <span style={S.cardTitle()}>🤖 Preenchimento Automático (Beta)</span>
             </div>
             <div style={S.cardBody}>
+              <details style={S.HelpDetails}>
+                <summary style={S.HelpSummary}>📖 Como preencher</summary>
+                <div style={S.HelpBox}>{PARSER_HELP_TEXT}</div>
+              </details>
               <Field label="Cole aqui o texto do Azure Calculator ou PDF">
                 <textarea
                   style={{ ...S.input, height: 180, resize: 'vertical' }}
                   value={rawInput}
                   onChange={e => setRawInput(e.target.value)}
+                  disabled={isParsing}
                   placeholder="Cole aqui todo o conteúdo do PDF ou da calculadora Azure..."
                 />
               </Field>
-              <button
-                style={{ ...S.openCalcBtn, marginTop: 15, cursor: 'pointer', border: 'none' }}
-                onClick={handleAutoFill}
-              >
-                🤖 Preencher automaticamente
-              </button>
+              <div style={S.parserBtnRow}>
+                <button
+                  style={{
+                    ...S.parserBtnPrimary,
+                    opacity: isParsing ? 0.6 : 1,
+                    cursor: isParsing ? 'not-allowed' : 'pointer',
+                  }}
+                  onClick={handleAutoFill}
+                  disabled={isParsing}
+                >
+                  🤖 Preencher automaticamente
+                </button>
+                <button
+                  style={{
+                    ...S.parserBtnSecondary,
+                    opacity: isParsing ? 0.6 : 1,
+                    cursor: isParsing ? 'not-allowed' : 'pointer',
+                  }}
+                  onClick={handleInsertExample}
+                  disabled={isParsing}
+                >
+                  📄 Inserir exemplo
+                </button>
+                <button
+                  style={{
+                    ...S.parserBtnSecondary,
+                    opacity: isParsing ? 0.6 : 1,
+                    cursor: isParsing ? 'not-allowed' : 'pointer',
+                  }}
+                  onClick={handleClear}
+                  disabled={isParsing}
+                >
+                  🗑 Limpar
+                </button>
+              </div>
               {parserMessage && (
                 <>
                   <p style={{
                     marginTop: 10,
-                    color: parserMessage.type === 'success' ? C.green : C.red,
+                    color: parserMessage.type === 'success' ? C.green
+                      : parserMessage.type === 'processing' ? C.blue
+                      : C.red,
                     fontSize: 12,
                     marginBottom: 0,
                   }}>
                     {parserMessage.text}
                   </p>
-                  {(parserMessage.summary?.length ?? 0) > 0 && (
+                  {(parserMessage.resourceSummary?.found?.length ?? 0) > 0 && (
                     <div style={{ ...S.copyBox, marginTop: 8, fontSize: 10 }}>
-                      <strong>Recursos identificados:</strong>
-                      {(parserMessage.summary ?? []).map((item, i) => (
+                      <strong style={{ color: C.green }}>✓ Recursos encontrados</strong>
+                      {(parserMessage.resourceSummary?.found ?? []).map((item, i) => (
+                        <div key={i}>• {item}</div>
+                      ))}
+                    </div>
+                  )}
+                  {(parserMessage.resourceSummary?.notFound?.length ?? 0) > 0 && (
+                    <div style={{ ...S.copyBox, marginTop: 8, fontSize: 10 }}>
+                      <strong style={{ color: C.yellow }}>⚠ Recursos não encontrados</strong>
+                      {(parserMessage.resourceSummary?.notFound ?? []).map((item, i) => (
                         <div key={i}>• {item}</div>
                       ))}
                     </div>

@@ -11,6 +11,54 @@ const PRESETS = {
   continuo:   { horasVM: 744, horasDbu: 744 },
 };
 
+const REGEX = {
+  nodesLabel:  /(?:nodes?|n[oó]s?)\s*:\s*(\d+)/i,
+  nodesValue:  /(\d+)\s*(?:nodes?|n[oó]s?)\b/i,
+  hoursLabel:  /(?:horas?\s*(?:de\s*execu[cç][aã]o|vm|dbu)?|hours?)\s*[:\-]?\s*(\d+)/i,
+  hoursValue:  /(\d+)\s*(?:h(?:oras?|ours?)?)\b/i,
+  storageTB:   /(\d+(?:[.,]\d+)?)\s*tb\b/i,
+  storageGB:   /(\d+(?:[.,]\d+)?)\s*gb(?!\s*ram)\b/i,
+  storageRAM:  /\d+(?:[.,]\d+)?\s*gb\s*ram\b/gi,
+  sqlWarehouse:   /sql\s*warehouse/i,
+  sqlServerless:  /sql\s*serverless|serverless\s*sql/i,
+  sqlDatabricks:  /databricks\s*sql/i,
+  sqlAnalytics:   /sql\s*analytics/i,
+  sqlCompute:     /sql\s*compute/i,
+  databricksPremium:  /(?:databricks\s+)?premium(?:\s+tier)?|premium(?:\s+tier)?(?:\s+databricks)?/i,
+  databricksStandard: /(?:databricks\s+)?standard(?:\s+tier)?|standard(?:\s+tier)?(?:\s+databricks)?/i,
+  regionBrazilSouth: /brazil\s*south|brasil\s*sul|south\s*brazil|\bbrasil\b/i,
+  regionEastUs:      /east\s*us|leste\s*dos\s*eua/i,
+  regionWestUs:      /west\s*us|oeste\s*dos\s*eua/i,
+  allPurpose:     /all[\s-]?purpose(?:\s*compute)?/i,
+  jobCompute:     /jobs?\s*compute/i,
+  jobCluster:     /job\s*cluster/i,
+  postgre:        /postgres(?:ql)?/i,
+  keyVault:       /key\s*vault/i,
+  pipeline:       /(\d+)\s*pipeline/i,
+  clusterSize:    /\b(xsmall|small|medium|large)\b/i,
+  projectName:    /(?:estimate\s*name|nome\s*(?:do\s*)?projeto|project\s*name)\s*[:\-]\s*(.+)/i,
+  yourEstimate:   /your\s*estimate\s*[:\-]\s*(.+)/i,
+  storageSection: /storage\s*accounts?|data\s*lake\s*storage|adls\s*gen\s*2/i,
+  freqHourly:     /hora|horária|hourly/i,
+  freqDaily:      /diári[ao]|daily/i,
+  freqWeekly:     /semanal|weekly/i,
+  freqMonthly:    /mensal|monthly/i,
+  instanceD16:    /\bd16a\s*v4\b|\bd16av4\b/i,
+  instanceD8:     /\bd8a\s*v4\b|\bd8av4\b|\bd8s\s*v3\b/i,
+  instanceD4:     /\bd4a\s*v4\b|\bd4av4\b/i,
+  instanceDS3:    /\bds3\s*v2\b|\bds3v2\b/i,
+  instanceD3:     /\bd3\s*v2\b|\bd3v2\b/i,
+};
+
+const RESOURCE_DEFS = [
+  { id: 'storage',     label: 'Storage',             mention: (t) => REGEX.storageSection.test(t) || REGEX.storageTB.test(t) || REGEX.storageGB.test(t) || /\bstorage\b/i.test(t) },
+  { id: 'allPurpose',  label: 'All Purpose Compute', mention: (t) => REGEX.allPurpose.test(t) },
+  { id: 'jobCompute',  label: 'Jobs Compute',        mention: (t) => REGEX.jobCompute.test(t) || REGEX.jobCluster.test(t) },
+  { id: 'sqlCompute',  label: 'SQL Serverless',      mention: (t) => REGEX.sqlServerless.test(t) || REGEX.sqlWarehouse.test(t) || REGEX.sqlDatabricks.test(t) || REGEX.sqlAnalytics.test(t) || REGEX.sqlCompute.test(t) },
+  { id: 'postgre',     label: 'PostgreSQL',          mention: (t) => REGEX.postgre.test(t) },
+  { id: 'keyVault',    label: 'Key Vault',           mention: (t) => REGEX.keyVault.test(t) },
+];
+
 const defaultEnv = (instance, nodes, preset, override = false) => ({
   enabled:  true,
   override,
@@ -71,51 +119,77 @@ const emptyFound = () => ({
 
 // ─── Helpers de extração ───────────────────────────────────────────────────────
 
-const INSTANCE_MAP = [
-  { re: /\bd16a\s*v4\b|\bd16av4\b/i,                       value: 'D16AV4' },
-  { re: /\bd8a\s*v4\b|\bd8av4\b|\bd8s\s*v3\b/i, value: 'D8AV4'  },
-  { re: /\bd4a\s*v4\b|\bd4av4\b/i,                         value: 'D4AV4'  },
-  { re: /\bds3\s*v2\b|\bds3v2\b/i,                         value: 'DS3V2'  },
-  { re: /\bd3\s*v2\b|\bd3v2\b/i,                           value: 'D3V2'   },
-];
-
 function matchInstance(text) {
-  for (const { re, value } of INSTANCE_MAP) {
-    if (re.test(text)) return value;
+  try {
+    if (!text) return null;
+    if (REGEX.instanceD16.test(text)) return 'D16AV4';
+    if (REGEX.instanceD8.test(text))  return 'D8AV4';
+    if (REGEX.instanceD4.test(text))  return 'D4AV4';
+    if (REGEX.instanceDS3.test(text)) return 'DS3V2';
+    if (REGEX.instanceD3.test(text))  return 'D3V2';
+    return null;
+  } catch {
+    return null;
   }
-  return null;
 }
 
 function matchRegion(text) {
-  if (/brazil\s*south|brasil|south\s*brazil/i.test(text)) return 'BRAZIL_SOUTH';
-  if (/east\s*us|leste\s*dos\s*eua/i.test(text))          return 'EAST_US';
-  if (/west\s*us|oeste\s*dos\s*eua/i.test(text))          return 'WEST_US';
-  return null;
+  try {
+    if (!text) return null;
+    if (REGEX.regionBrazilSouth.test(text)) return 'BRAZIL_SOUTH';
+    if (REGEX.regionEastUs.test(text))      return 'EAST_US';
+    if (REGEX.regionWestUs.test(text))      return 'WEST_US';
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 function matchStorageGB(text) {
-  const tb = text.match(/(\d+(?:[.,]\d+)?)\s*tb\b/i);
-  if (tb) return Math.round(parseFloat(tb[1].replace(',', '.')) * 1024);
+  try {
+    if (!text) return null;
+    const cleaned = String(text).replace(REGEX.storageRAM, '');
 
-  const gb = text.match(/(\d+(?:[.,]\d+)?)\s*gb\b/i);
-  if (gb) return Math.round(parseFloat(gb[1].replace(',', '.')));
+    const tb = cleaned.match(REGEX.storageTB);
+    if (tb) return Math.round(parseFloat(tb[1].replace(',', '.')) * 1024);
 
-  return null;
+    const gb = cleaned.match(REGEX.storageGB);
+    if (gb) return Math.round(parseFloat(gb[1].replace(',', '.')));
+
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 function matchHours(text) {
-  const m = text.match(/(\d+)\s*h(?:oras?|ours?)?\b/i);
-  return m ? parseInt(m[1], 10) : null;
+  try {
+    if (!text) return null;
+    const m = text.match(REGEX.hoursLabel) || text.match(REGEX.hoursValue);
+    return m ? parseInt(m[1], 10) : null;
+  } catch {
+    return null;
+  }
 }
 
 function matchNodes(text) {
-  const m = text.match(/(\d+)\s*(?:n[oó]s?|nodes?)\b/i);
-  return m ? parseInt(m[1], 10) : null;
+  try {
+    if (!text) return null;
+    const m = text.match(REGEX.nodesLabel) || text.match(REGEX.nodesValue);
+    return m ? parseInt(m[1], 10) : null;
+  } catch {
+    return null;
+  }
 }
 
 function matchClusterSize(text) {
-  const m = text.match(/\b(xsmall|small|medium|large)\b/i);
-  return m ? m[1].toUpperCase() : null;
+  try {
+    if (!text) return null;
+    const m = text.match(REGEX.clusterSize);
+    return m ? m[1].toUpperCase() : null;
+  } catch {
+    return null;
+  }
 }
 
 function hoursToPreset(horasVM, horasDbu) {
@@ -126,58 +200,114 @@ function hoursToPreset(horasVM, horasDbu) {
 }
 
 function sectionSlice(text, patterns) {
-  const lower = text.toLowerCase();
-  for (const pat of patterns) {
-    const idx = lower.search(pat);
-    if (idx >= 0) {
-      const rest = text.slice(idx);
-      const nextSection = rest.slice(1).search(/\n\s*(?:azure |storage |postgresql|key vault|total\b)/i);
-      return nextSection >= 0 ? rest.slice(0, nextSection + 1) : rest.slice(0, 800);
+  try {
+    if (!text) return '';
+    const blocks = text.split(/(?:\n\s*\n)|(?=\n\s*\d+\.\s+)/);
+
+    for (const block of blocks) {
+      const lower = block.toLowerCase();
+      for (const pat of patterns) {
+        if (lower.search(pat) >= 0) return block;
+      }
+    }
+    return '';
+  } catch {
+    return '';
+  }
+}
+
+function matchesSql(text) {
+  try {
+    if (!text) return false;
+    return REGEX.sqlServerless.test(text) ||
+      REGEX.sqlWarehouse.test(text) ||
+      REGEX.sqlDatabricks.test(text) ||
+      REGEX.sqlAnalytics.test(text) ||
+      REGEX.sqlCompute.test(text);
+  } catch {
+    return false;
+  }
+}
+
+function applyWorkloadFields(workload, section, globalText) {
+  const source = section || globalText;
+  const instance = matchInstance(source);
+  if (instance) workload.prod.instance = instance;
+
+  const nodes = matchNodes(source);
+  if (nodes) workload.prod.nodes = nodes;
+
+  const horas = matchHours(source);
+  if (horas != null) {
+    workload.prod.horasVM  = horas;
+    workload.prod.horasDbu = horas;
+    workload.prod.preset   = hoursToPreset(horas, horas);
+  }
+}
+
+/** Monta listas de recursos encontrados e não encontrados para o resumo da UI */
+function buildResourceSummary(text, found) {
+  const foundFlags = {
+    storage:    !!(found.storageGB || found.storageEnabled),
+    allPurpose: !!found.allPurpose,
+    jobCompute: !!found.jobCompute,
+    sqlCompute: !!found.sqlCompute,
+    postgre:    !!found.postgre,
+    keyVault:   !!found.keyVault,
+  };
+
+  const foundList    = [];
+  const notFoundList = [];
+
+  for (const r of RESOURCE_DEFS) {
+    if (foundFlags[r.id]) {
+      foundList.push(r.label);
+    } else if (r.mention(text)) {
+      notFoundList.push(r.label);
     }
   }
-  return text;
+
+  return { found: foundList, notFound: notFoundList };
+}
+
+function regionLabel(value) {
+  const map = {
+    EAST_US:      'East US',
+    WEST_US:      'West US',
+    BRAZIL_SOUTH: 'Brazil South',
+  };
+  return map[value] ?? value;
 }
 
 // ─── Parser principal ───────────────────────────────────────────────────────────
 
 /**
- * @returns {{ config: object, found: object, extracted: string[], warnings: string[] }}
+ * @returns {{ config: object, found: object, extracted: string[], warnings: string[], resourceSummary: { found: string[], notFound: string[] } }}
  */
 export function parseProject(text) {
-  const config  = getDefaultConfig();
-  const found   = emptyFound();
+  const config    = getDefaultConfig();
+  const found     = emptyFound();
   const extracted = [];
   const warnings  = [];
 
   if (!text || !String(text).trim()) {
     warnings.push('Nenhum texto fornecido.');
-    return { config, found, extracted, warnings };
+    return { config, found, extracted, warnings, resourceSummary: { found: [], notFound: [] } };
   }
 
   const originalText = String(text);
   const lower = originalText.toLowerCase();
 
   // ── Nome do projeto ──
-  const namePatterns = [
-    /(?:estimate\s*name|nome\s*(?:do\s*)?projeto|project\s*name)\s*[:\-]\s*(.+)/i,
-    /your\s*estimate\s*[:\-]\s*(.+)/i,
-  ];
-  for (const re of namePatterns) {
-    const m = originalText.match(re);
-    if (m?.[1]?.trim()) {
-      config.projectName = m[1].trim().split('\n')[0].slice(0, 120);
-      found.projectName = true;
-      extracted.push(`Projeto: ${config.projectName}`);
-      break;
-    }
+  const nameMatch = originalText.match(REGEX.projectName) ?? originalText.match(REGEX.yourEstimate);
+  if (nameMatch?.[1]?.trim()) {
+    config.projectName = nameMatch[1].trim().split('\n')[0].slice(0, 120);
+    found.projectName = true;
+    extracted.push(`Projeto: ${config.projectName}`);
   }
 
   // ── Storage ──
-  const storageSection = sectionSlice(originalText, [
-    /storage\s*accounts?/i,
-    /data\s*lake\s*storage/i,
-    /adls\s*gen\s*2/i,
-  ]);
+  const storageSection = sectionSlice(originalText, [REGEX.storageSection]) || originalText;
   const storageGB = matchStorageGB(storageSection) ?? matchStorageGB(originalText);
   if (storageGB != null && storageGB > 0) {
     config.storageGB = storageGB;
@@ -200,31 +330,31 @@ export function parseProject(text) {
   }
 
   // ── Tier ──
-  if (/\bstandard\b/i.test(originalText) && !/\bpremium\b/i.test(originalText)) {
+  const hasPremium  = REGEX.databricksPremium.test(originalText);
+  const hasStandard = REGEX.databricksStandard.test(originalText);
+  if (hasStandard && !hasPremium) {
     config.tier = 'standard';
     found.tier = true;
     extracted.push('Tier: Standard');
-  } else if (/\bpremium\b/i.test(originalText)) {
+  } else if (hasPremium) {
     config.tier = 'premium';
     found.tier = true;
     extracted.push('Tier: Premium');
   }
 
   // ── All-Purpose Compute ──
-  const apSection = sectionSlice(originalText, [
-    /all[\s-]?purpose\s*compute/i,
-    /all[\s-]?purpose\b/i,
-    /databricks[\s\S]{0,40}all/i,
-  ]);
-  const apDetected = /all[\s-]?purpose/i.test(apSection) ||
-    (/databricks/i.test(originalText) && /all[\s-]?purpose/i.test(originalText));
+  const apSection = sectionSlice(originalText, [REGEX.allPurpose]);
+  const apMentioned = REGEX.allPurpose.test(originalText);
+  const apHasData = apSection
+    ? (matchInstance(apSection) != null || matchNodes(apSection) != null || matchHours(apSection) != null)
+    : false;
 
-  if (apDetected || matchInstance(apSection) || matchHours(apSection)) {
+  if (apMentioned || apHasData) {
     config.allPurpose.enabled = true;
     found.allPurpose = true;
     extracted.push('All-Purpose Compute');
 
-    const apRegion = matchRegion(apSection);
+    const apRegion = matchRegion(apSection || originalText);
     if (apRegion && apRegion !== 'BRAZIL_SOUTH') {
       config.allPurpose.region = apRegion;
     } else if (apRegion === 'BRAZIL_SOUTH') {
@@ -232,35 +362,22 @@ export function parseProject(text) {
       warnings.push('All-Purpose: Brazil South não suportado para compute — usando East US.');
     }
 
-    const instance = matchInstance(apSection);
-    if (instance) config.allPurpose.prod.instance = instance;
-
-    const nodes = matchNodes(apSection);
-    if (nodes) config.allPurpose.prod.nodes = nodes;
-
-    const horas = matchHours(apSection);
-    if (horas) {
-      config.allPurpose.prod.horasVM  = horas;
-      config.allPurpose.prod.horasDbu = horas;
-      config.allPurpose.prod.preset   = hoursToPreset(horas, horas);
-    }
+    applyWorkloadFields(config.allPurpose, apSection, originalText);
   }
 
   // ── Job Compute ──
-  const jobSection = sectionSlice(originalText, [
-    /jobs?\s*compute/i,
-    /job\s*cluster/i,
-    /databricks[\s\S]{0,40}job/i,
-  ]);
-  const jobDetected = /jobs?\s*compute/i.test(jobSection) ||
-    (/databricks/i.test(originalText) && /jobs?\s*compute/i.test(originalText));
+  const jobSection = sectionSlice(originalText, [REGEX.jobCompute, REGEX.jobCluster]);
+  const jobMentioned = REGEX.jobCompute.test(originalText) || REGEX.jobCluster.test(originalText);
+  const jobHasData = jobSection
+    ? (matchInstance(jobSection) != null || matchNodes(jobSection) != null || matchHours(jobSection) != null || matchRegion(jobSection) != null)
+    : false;
 
-  if (jobDetected || (matchInstance(jobSection) && !apDetected)) {
+  if (jobMentioned || jobHasData) {
     config.jobCompute.enabled = true;
     found.jobCompute = true;
     extracted.push('Job Compute');
 
-    const jobRegion = matchRegion(jobSection);
+    const jobRegion = matchRegion(jobSection || originalText);
     if (jobRegion && jobRegion !== 'BRAZIL_SOUTH') {
       config.jobCompute.region = jobRegion;
     } else if (jobRegion === 'BRAZIL_SOUTH') {
@@ -268,68 +385,58 @@ export function parseProject(text) {
       warnings.push('Job Compute: Brazil South não suportado para compute — usando West US.');
     }
 
-    const instance = matchInstance(jobSection);
-    if (instance) config.jobCompute.prod.instance = instance;
-
-    const nodes = matchNodes(jobSection);
-    if (nodes) config.jobCompute.prod.nodes = nodes;
-
-    const horas = matchHours(jobSection);
-    if (horas) {
-      config.jobCompute.prod.horasVM  = horas;
-      config.jobCompute.prod.horasDbu = horas;
-      config.jobCompute.prod.preset   = hoursToPreset(horas, horas);
-    }
+    applyWorkloadFields(config.jobCompute, jobSection, originalText);
   }
 
   // ── SQL Serverless ──
   const sqlSection = sectionSlice(originalText, [
-    /sql\s*serverless/i,
-    /serverless\s*sql/i,
-    /databricks\s*sql/i,
-    /sql\s*analytics/i,
-    /sql\s*compute/i,
+    REGEX.sqlServerless,
+    REGEX.sqlWarehouse,
+    REGEX.sqlDatabricks,
+    REGEX.sqlAnalytics,
+    REGEX.sqlCompute,
   ]);
-  if (/sql\s*serverless|serverless\s*sql|databricks\s*sql|sql\s*analytics|sql\s*compute/i.test(sqlSection)) {
+  if (matchesSql(sqlSection) || matchesSql(originalText)) {
     config.sqlCompute.enabled = true;
     config.sqlCompute.prod.enabled = true;
     found.sqlCompute = true;
     extracted.push('SQL Serverless');
 
-    const size = matchClusterSize(sqlSection);
+    const sqlSource = sqlSection || originalText;
+    const size = matchClusterSize(sqlSource);
     if (size) config.sqlCompute.prod.clusterSize = size;
 
-    const horas = matchHours(sqlSection);
+    const horas = matchHours(sqlSource);
     if (horas != null) config.sqlCompute.prod.horas = horas;
   }
 
   // ── PostgreSQL ──
-  if (/postgres(?:ql)?/i.test(originalText)) {
+  if (REGEX.postgre.test(originalText)) {
     config.postgre = true;
     found.postgre = true;
     extracted.push('PostgreSQL Flexible');
   }
 
   // ── Key Vault ──
-  if (/key\s*vault/i.test(originalText)) {
+  if (REGEX.keyVault.test(originalText)) {
     config.keyVault = true;
     found.keyVault = true;
     extracted.push('Key Vault');
   }
 
   // ── Linguagem natural: pipelines + frequência ──
-  const pipelineMatch = lower.match(/(\d+)\s*pipeline/i);
+  const pipelineMatch = lower.match(REGEX.pipeline);
   if (pipelineMatch) {
     extracted.push(`Pipelines: ${pipelineMatch[1]}`);
   }
 
   let freqHours = null;
-  if (/hora|horária|hourly/i.test(lower))           freqHours = 730;
-  else if (/diári[ao]|daily/i.test(lower))          freqHours = 352;
-  else if (/semanal|weekly/i.test(lower))           freqHours = 96;
-  else if (/mensal|monthly/i.test(lower))           freqHours = 24;
+  if (REGEX.freqHourly.test(lower))       freqHours = 730;
+  else if (REGEX.freqDaily.test(lower))   freqHours = 352;
+  else if (REGEX.freqWeekly.test(lower))  freqHours = 96;
+  else if (REGEX.freqMonthly.test(lower)) freqHours = 24;
 
-  if (freqHours && found.jobCompute && !matchHours(jobSection)) {
+  if (freqHours && found.jobCompute && !matchHours(jobSection) && !matchHours(originalText)) {
     config.jobCompute.prod.horasVM  = freqHours;
     config.jobCompute.prod.horasDbu = freqHours;
     config.jobCompute.prod.preset   = hoursToPreset(freqHours, freqHours);
@@ -343,14 +450,7 @@ export function parseProject(text) {
     warnings.push('Região não identificada — mantendo padrão.');
   }
 
-  return { config, found, extracted, warnings };
-}
+  const resourceSummary = buildResourceSummary(originalText, found);
 
-function regionLabel(value) {
-  const map = {
-    EAST_US:      'East US',
-    WEST_US:      'West US',
-    BRAZIL_SOUTH: 'Brazil South',
-  };
-  return map[value] ?? value;
+  return { config, found, extracted, warnings, resourceSummary };
 }
