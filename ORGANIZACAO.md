@@ -37,7 +37,7 @@ Para acelerar a entrega e transformar as decisões da Semana 1 em código, divid
 - Refinamento lógico e estrutural do Parser de Preenchimento Automático. Aplicação de Expressões Regulares (Regex) avançadas — como Negative Lookahead para evitar falsos positivos entre memória RAM e Storage — e reestruturação do algoritmo de fatiamento de texto (Block Slicing) para garantir a extração isolada e precisa de dados de arquiteturas complexas.
 
 **Cauã Souza Almeida (Front-end e Interface):**
-- Construção da interface visual interativa (MVP v0.1 e v0.2).
+- Construção da interface visual interativa (MVP).
 - Mapeamento da experiência do arquiteto, acomodando os inputs de horas (mitigando o risco de *Data Computing* identificado no Dia 2).
 - Construção do painel "Guia de Preenchimento", consolidando a decisão de UX tomada após o *spike* do Dia 3.
 - Implementação da Killer Feature do MVP: O Preenchimento Automático (BETA). Criação de um parser de texto capaz de ler PDFs ou propostas brutas e traduzir em configurações de estado no React, antecipando uma visão de longo prazo do negócio já para a entrega do MVP.
